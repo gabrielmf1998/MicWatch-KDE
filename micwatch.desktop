@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=MicWatch
+GenericName=Microphone Indicator
+Comment=Tray indicator that lights up when the microphone is in use
+Exec=micwatch
+Icon=audio-input-microphone
+Terminal=false
+Categories=AudioVideo;Audio;Utility;
+StartupNotify=false
+X-GNOME-UsesNotifications=false
