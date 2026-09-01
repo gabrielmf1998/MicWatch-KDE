@@ -150,16 +150,16 @@ def _contrast(color: QColor) -> QColor:
 # --------------------------------------------------------------------------
 # glyphs
 # --------------------------------------------------------------------------
-def _mic(p: QPainter, c: QColor, filled: bool, weight: float = 8.0, scale: float = 1.0) -> None:
+def _mic(p: QPainter, c: QColor, filled: bool, weight: float = 9.0, scale: float = 1.0) -> None:
     p.save()
     if scale != 1.0:
         p.translate(50, 50)
         p.scale(scale, scale)
         p.translate(-50, -50)
     pen = QPen(c, weight, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
-    capsule = QRectF(37, 12, 26, 44)
+    capsule = QRectF(33, 6, 34, 52)
     path = QPainterPath()
-    path.addRoundedRect(capsule, 13, 13)
+    path.addRoundedRect(capsule, 17, 17)
     if filled:
         p.setPen(Qt.NoPen)
         p.setBrush(c)
@@ -170,19 +170,19 @@ def _mic(p: QPainter, c: QColor, filled: bool, weight: float = 8.0, scale: float
         p.drawPath(path)
     p.setBrush(Qt.NoBrush)
     p.setPen(pen)
-    p.drawArc(QRectF(27, 34, 46, 44), 180 * 16, 180 * 16)
-    p.drawLine(QPointF(50, 78), QPointF(50, 88))
-    p.drawLine(QPointF(36, 88), QPointF(64, 88))
+    p.drawArc(QRectF(19, 28, 62, 56), 180 * 16, 180 * 16)
+    p.drawLine(QPointF(50, 84), QPointF(50, 90))
+    p.drawLine(QPointF(33, 93), QPointF(67, 93))
     p.restore()
 
 
 def _mic_round(p: QPainter, c: QColor, level: float) -> None:
     p.setPen(Qt.NoPen)
     p.setBrush(c)
-    p.drawEllipse(QPointF(50, 50), 46, 46)
+    p.drawEllipse(QPointF(50, 50), 49, 49)
     p.save()
     p.translate(50, 50)
-    p.scale(0.62, 0.62)
+    p.scale(0.68, 0.68)
     p.translate(-50, -50)
     _mic(p, _contrast(c), False, 9.0)
     p.restore()
@@ -191,57 +191,58 @@ def _mic_round(p: QPainter, c: QColor, level: float) -> None:
 def _badge(p: QPainter, c: QColor, level: float) -> None:
     p.setPen(Qt.NoPen)
     p.setBrush(c)
-    p.drawRoundedRect(QRectF(6, 6, 88, 88), 26, 26)
+    p.drawRoundedRect(QRectF(2, 2, 96, 96), 28, 28)
     p.save()
     p.translate(50, 50)
-    p.scale(0.64, 0.64)
+    p.scale(0.70, 0.70)
     p.translate(-50, -50)
     _mic(p, _contrast(c), False, 9.0)
     p.restore()
 
 
 def _mic_boom(p: QPainter, c: QColor, level: float) -> None:
-    pen = QPen(c, 9, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    pen = QPen(c, 10, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
     p.setPen(pen)
     p.setBrush(Qt.NoBrush)
-    p.drawArc(QRectF(18, 16, 64, 60), 20 * 16, 140 * 16)   # headband
+    p.drawArc(QRectF(11, 8, 78, 68), 20 * 16, 140 * 16)    # headband
     p.setPen(Qt.NoPen)
     p.setBrush(c)
-    p.drawRoundedRect(QRectF(14, 44, 18, 30), 8, 8)        # ear cup
-    p.drawRoundedRect(QRectF(68, 44, 18, 30), 8, 8)
+    p.drawRoundedRect(QRectF(6, 42, 21, 34), 9, 9)         # ear cup
+    p.drawRoundedRect(QRectF(73, 42, 21, 34), 9, 9)
     p.setPen(pen)
-    path = QPainterPath(QPointF(77, 72))
-    path.quadTo(QPointF(72, 88), QPointF(56, 88))          # boom arm
+    path = QPainterPath(QPointF(83, 74))
+    path.quadTo(QPointF(78, 92), QPointF(58, 92))          # boom arm
     p.setBrush(Qt.NoBrush)
     p.drawPath(path)
     p.setPen(Qt.NoPen)
     p.setBrush(c)
-    p.drawEllipse(QPointF(50, 88), 9 + 4 * min(1.0, level * 6), 9 + 4 * min(1.0, level * 6))
+    r = 10 + 5 * min(1.0, level * 6)
+    p.drawEllipse(QPointF(50, 92), r, r)
 
 
 def _mic_stand(p: QPainter, c: QColor, level: float) -> None:
     p.setPen(Qt.NoPen)
     p.setBrush(c)
-    p.drawRoundedRect(QRectF(30, 10, 40, 52), 20, 20)      # capsule
+    p.drawRoundedRect(QRectF(26, 4, 48, 58), 24, 24)       # capsule
     grid = QColor(_contrast(c))
     grid.setAlphaF(c.alphaF() * 0.75)
-    p.setPen(QPen(grid, 4, Qt.SolidLine, Qt.RoundCap))
-    for y in (24, 34, 44):
-        p.drawLine(QPointF(38, y), QPointF(62, y))
-    p.setPen(QPen(c, 8, Qt.SolidLine, Qt.RoundCap))
-    p.drawLine(QPointF(50, 62), QPointF(50, 84))
-    p.drawLine(QPointF(30, 90), QPointF(70, 90))
+    p.setPen(QPen(grid, 5, Qt.SolidLine, Qt.RoundCap))
+    for y in (20, 32, 44):
+        p.drawLine(QPointF(36, y), QPointF(64, y))
+    p.setPen(QPen(c, 9, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(QPointF(50, 62), QPointF(50, 88))
+    p.drawLine(QPointF(26, 94), QPointF(74, 94))
 
 
 def _dot(p: QPainter, c: QColor, level: float, ring: bool = False) -> None:
-    radius = 24 + 12 * min(1.0, level * 6.0)
+    radius = 32 + 14 * min(1.0, level * 6.0)
     if ring:
         faint = QColor(c)
         faint.setAlphaF(c.alphaF() * 0.45)
-        p.setPen(QPen(faint, 7))
+        p.setPen(QPen(faint, 8))
         p.setBrush(Qt.NoBrush)
-        p.drawEllipse(QPointF(50, 50), 44, 44)
-        radius = min(radius, 30)
+        p.drawEllipse(QPointF(50, 50), 45, 45)
+        radius = min(radius, 32)
     p.setPen(Qt.NoPen)
     p.setBrush(c)
     p.drawEllipse(QPointF(50, 50), radius, radius)
@@ -250,30 +251,31 @@ def _dot(p: QPainter, c: QColor, level: float, ring: bool = False) -> None:
 def _led(p: QPainter, c: QColor, level: float) -> None:
     p.setPen(Qt.NoPen)
     p.setBrush(c)
-    size = 62 + 18 * min(1.0, level * 6.0)
+    size = 76 + 20 * min(1.0, level * 6.0)
     p.drawRoundedRect(QRectF(50 - size / 2, 50 - size / 2, size, size), 16, 16)
 
 
 def _record(p: QPainter, c: QColor, level: float) -> None:
     faint = QColor(c)
     faint.setAlphaF(c.alphaF() * 0.40)
-    p.setPen(QPen(faint, 8))
+    p.setPen(QPen(faint, 9))
     p.setBrush(Qt.NoBrush)
-    p.drawEllipse(QPointF(50, 50), 42, 42)
+    p.drawEllipse(QPointF(50, 50), 45, 45)
     p.setPen(Qt.NoPen)
     p.setBrush(c)
-    p.drawEllipse(QPointF(50, 50), 24 + 6 * min(1.0, level * 6.0), 24 + 6 * min(1.0, level * 6.0))
+    r = 29 + 7 * min(1.0, level * 6.0)
+    p.drawEllipse(QPointF(50, 50), r, r)
 
 
 def _ring(p: QPainter, c: QColor, level: float, dual: bool = False) -> None:
-    box = QRectF(16, 16, 68, 68)
+    box = QRectF(11, 11, 78, 78)
     faint = QColor(c)
     faint.setAlphaF(c.alphaF() * 0.28)
     p.setBrush(Qt.NoBrush)
-    p.setPen(QPen(faint, 10, Qt.SolidLine, Qt.RoundCap))
+    p.setPen(QPen(faint, 12, Qt.SolidLine, Qt.RoundCap))
     p.drawEllipse(box)
     span = int(360 * 16 * max(0.02, min(1.0, level * 5.0)))
-    p.setPen(QPen(c, 10, Qt.SolidLine, Qt.RoundCap))
+    p.setPen(QPen(c, 12, Qt.SolidLine, Qt.RoundCap))
     if dual:
         half = span // 2
         p.drawArc(box, 90 * 16, -half)
@@ -283,71 +285,71 @@ def _ring(p: QPainter, c: QColor, level: float, dual: bool = False) -> None:
 
 
 def _gauge(p: QPainter, c: QColor, level: float) -> None:
-    box = QRectF(12, 22, 76, 76)
+    box = QRectF(7, 14, 86, 86)
     faint = QColor(c)
     faint.setAlphaF(c.alphaF() * 0.30)
     p.setBrush(Qt.NoBrush)
-    p.setPen(QPen(faint, 11, Qt.SolidLine, Qt.RoundCap))
+    p.setPen(QPen(faint, 13, Qt.SolidLine, Qt.RoundCap))
     p.drawArc(box, 180 * 16, -180 * 16)
     filled = min(1.0, level * 5.0)
-    p.setPen(QPen(c, 11, Qt.SolidLine, Qt.RoundCap))
+    p.setPen(QPen(c, 13, Qt.SolidLine, Qt.RoundCap))
     p.drawArc(box, 180 * 16, int(-180 * 16 * max(0.02, filled)))
     angle = math.pi - math.pi * filled
-    p.setPen(QPen(c, 7, Qt.SolidLine, Qt.RoundCap))
-    p.drawLine(QPointF(50, 60), QPointF(50 + 28 * math.cos(angle), 60 - 28 * math.sin(angle)))
+    p.setPen(QPen(c, 8, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(QPointF(50, 57), QPointF(50 + 33 * math.cos(angle), 57 - 33 * math.sin(angle)))
 
 
-def _bars(p: QPainter, c: QColor, level: float, factors=_BAR_FACTORS, width=12.0, gap=6.0) -> None:
+def _bars(p: QPainter, c: QColor, level: float, factors=_BAR_FACTORS, width=13.0, gap=6.0) -> None:
     p.setPen(Qt.NoPen)
     p.setBrush(c)
     total = width * len(factors) + gap * (len(factors) - 1)
     x = 50 - total / 2
     loud = min(1.0, level * 5.0)
     for factor in factors:
-        base = 14.0 + 24.0 * factor
-        height = max(12.0, min(88.0, base + (86.0 - base) * loud * factor))
+        base = 18.0 + 30.0 * factor
+        height = max(14.0, min(96.0, base + (96.0 - base) * loud * factor))
         p.drawRoundedRect(QRectF(x, 50 - height / 2, width, height), width / 2, width / 2)
         x += width + gap
 
 
 def _waveform(p: QPainter, c: QColor, level: float) -> None:
-    amp = 6 + 30 * min(1.0, level * 5.0)
-    path = QPainterPath(QPointF(8, 50))
+    amp = 8 + 38 * min(1.0, level * 5.0)
+    path = QPainterPath(QPointF(5, 50))
     steps = 48
     for i in range(1, steps + 1):
-        x = 8 + 84 * i / steps
+        x = 5 + 90 * i / steps
         y = 50 - amp * math.sin(i / steps * 3.2 * math.pi)
         path.lineTo(QPointF(x, y))
     p.setBrush(Qt.NoBrush)
-    p.setPen(QPen(c, 9, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.setPen(QPen(c, 10, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
     p.drawPath(path)
 
 
 def _radar(p: QPainter, c: QColor, level: float) -> None:
     p.setBrush(Qt.NoBrush)
     loud = min(1.0, level * 5.0)
-    for i, radius in enumerate((20, 34, 48)):
+    for i, radius in enumerate((23, 40, 57)):
         arc = QColor(c)
         reach = loud * 3.0
         arc.setAlphaF(c.alphaF() * (1.0 if reach >= i + 1 else max(0.18, reach - i)))
-        p.setPen(QPen(arc, 9, Qt.SolidLine, Qt.RoundCap))
-        p.drawArc(QRectF(50 - radius, 62 - radius, radius * 2, radius * 2), 40 * 16, 100 * 16)
+        p.setPen(QPen(arc, 10, Qt.SolidLine, Qt.RoundCap))
+        p.drawArc(QRectF(50 - radius, 74 - radius, radius * 2, radius * 2), 40 * 16, 100 * 16)
     p.setPen(Qt.NoPen)
     p.setBrush(c)
-    p.drawEllipse(QPointF(50, 68), 9, 9)
+    p.drawEllipse(QPointF(50, 80), 10, 10)
 
 
 def _pulse_line(p: QPainter, c: QColor, level: float) -> None:
-    amp = 10 + 28 * min(1.0, level * 5.0)
-    path = QPainterPath(QPointF(6, 50))
-    path.lineTo(QPointF(30, 50))
-    path.lineTo(QPointF(38, 50 - amp))
+    amp = 12 + 34 * min(1.0, level * 5.0)
+    path = QPainterPath(QPointF(4, 50))
+    path.lineTo(QPointF(28, 50))
+    path.lineTo(QPointF(37, 50 - amp))
     path.lineTo(QPointF(46, 50 + amp * 0.8))
-    path.lineTo(QPointF(54, 50 - amp * 0.35))
-    path.lineTo(QPointF(62, 50))
-    path.lineTo(QPointF(94, 50))
+    path.lineTo(QPointF(55, 50 - amp * 0.35))
+    path.lineTo(QPointF(64, 50))
+    path.lineTo(QPointF(96, 50))
     p.setBrush(Qt.NoBrush)
-    p.setPen(QPen(c, 9, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.setPen(QPen(c, 10, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
     p.drawPath(path)
 
 
@@ -366,7 +368,7 @@ _DRAW = {
     "ring_dual": lambda p, c, lv: _ring(p, c, lv, True),
     "gauge": _gauge,
     "bars": lambda p, c, lv: _bars(p, c, lv),
-    "bars_wide": lambda p, c, lv: _bars(p, c, lv, _WIDE_FACTORS, 9.0, 4.0),
+    "bars_wide": lambda p, c, lv: _bars(p, c, lv, _WIDE_FACTORS, 10.0, 4.0),
     "waveform": _waveform,
     "radar": _radar,
     "pulse_line": _pulse_line,
@@ -382,6 +384,7 @@ def render_pixmap(
     *,
     level: float = 0.0,
     state: AnimState | None = None,
+    size: float = 1.0,
     px: int = 128,
 ) -> QPixmap:
     st = state or AnimState()
@@ -421,7 +424,8 @@ def render_pixmap(
     painter.translate(50, 50 + st.dy)
     if st.rotation:
         painter.rotate(st.rotation)
-    painter.scale(st.scale, st.scale)
+    zoom = st.scale * max(0.4, min(1.0, size))
+    painter.scale(zoom, zoom)
     painter.translate(-50, -50)
 
     _DRAW.get(style, _DRAW["mic"])(painter, paint_color, level)

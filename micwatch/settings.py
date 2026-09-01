@@ -157,6 +157,7 @@ class IconPreview(QWidget):
                 QColor(self.config[key]),
                 level=level,
                 state=state,
+                size=float(self.config["icon_size"]),
                 px=size * 2,
             )
             x = step * i + step / 2 - size / 2
@@ -235,7 +236,7 @@ class SettingsWindow(QWidget):
             button.setCheckable(True)
             button.setAutoRaise(True)
             button.setToolTip(label)
-            button.setIconSize(QSize(30, 30))
+            button.setIconSize(QSize(34, 34))
             button.setChecked(key == self.config["icon_style"])
             button.clicked.connect(lambda _=False, k=key: self._set("icon_style", k))
             self._style_group.addButton(button)
@@ -245,6 +246,18 @@ class SettingsWindow(QWidget):
         self._refresh_style_icons()
 
         form = QFormLayout()
+
+        size_row = QHBoxLayout()
+        self.icon_size = QSlider(Qt.Horizontal)
+        self.icon_size.setRange(50, 100)
+        self.icon_size.setValue(int(round(float(self.config["icon_size"]) * 100)))
+        self.icon_size.valueChanged.connect(self._icon_size_moved)
+        self.icon_size_label = QLabel(f"{float(self.config['icon_size']) * 100:.0f}%")
+        self.icon_size_label.setMinimumWidth(46)
+        size_row.addWidget(self.icon_size, 1)
+        size_row.addWidget(self.icon_size_label)
+        form.addRow("Icon size", size_row)
+
         self.anim_box = QComboBox()
         for key, label in icons.ANIMATIONS:
             self.anim_box.addItem(label, key)
@@ -470,9 +483,17 @@ class SettingsWindow(QWidget):
     # -- helpers ---------------------------------------------------------
     def _refresh_style_icons(self) -> None:
         colour = QColor(self.config["color_active"])
+        size = float(self.config["icon_size"])
         for key, button in self._style_buttons.items():
-            button.setIcon(icons.render_icon(key, colour, level=0.22, px=96))
+            button.setIcon(icons.render_icon(key, colour, level=0.22, size=size, px=96))
             button.setChecked(key == self.config["icon_style"])
+        if hasattr(self, "icon_size_label"):  # the grid is built before the slider
+            self.icon_size_label.setText(f"{size * 100:.0f}%")
+
+    def _icon_size_moved(self, value: int) -> None:
+        self.config["icon_size"] = value / 100.0
+        self._refresh_style_icons()
+        self._apply()
 
     def _update_threshold_label(self) -> None:
         db = float(self.config["threshold_db"])
@@ -562,7 +583,7 @@ class SettingsWindow(QWidget):
 
     def _set(self, key: str, value) -> None:
         self.config[key] = value
-        if key in ("icon_style", "color_active"):
+        if key in ("icon_style", "color_active", "icon_size"):
             self._refresh_style_icons()
         self._apply()
 

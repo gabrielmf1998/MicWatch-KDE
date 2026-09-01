@@ -250,6 +250,7 @@ class MicWatchTray(QObject):
                     self._colors(),
                     level=self.level if metering else (0.28 if self.state == ACTIVE else 0.0),
                     state=state,
+                    size=float(self.config["icon_size"]),
                 )
             )
         )

@@ -29,9 +29,9 @@ curl -fsSL https://raw.githubusercontent.com/gabrielmf1998/MicWatch-KDE/main/ins
 Or grab a package from the [latest release](https://github.com/gabrielmf1998/MicWatch-KDE/releases/latest):
 
 ```sh
-sudo dnf install ./micwatch-kde-1.0.0-1.fc46.noarch.rpm       # Fedora
-sudo apt install ./micwatch-kde_1.0.0-1_all.deb               # Debian / Ubuntu
-sudo pacman -U ./micwatch-kde-1.0.0-1-any.pkg.tar.zst         # Arch
+sudo dnf install ./micwatch-kde-1.0.1-1.fc46.noarch.rpm       # Fedora
+sudo apt install ./micwatch-kde_1.0.1-1_all.deb               # Debian / Ubuntu
+sudo pacman -U ./micwatch-kde-1.0.1-1-any.pkg.tar.zst         # Arch
 chmod +x MicWatch-KDE-x86_64.AppImage && ./MicWatch-KDE-x86_64.AppImage
 ```
 
@@ -71,6 +71,7 @@ Start with the session, hide the icon while idle, or drop the separate "quiet" c
 
 ## Features
 
+- **Icon size slider** — every style fills the tray slot at 100%, dial it down to taste.
 - **18 icon styles** — microphone (outline/solid/circle/badge), headset mic, studio mic,
   dot, dot with ring, LED tile, record, ring meter, double ring, gauge, level bars,
   wide bars, waveform, signal waves and heartbeat line. Picked from a visual grid.

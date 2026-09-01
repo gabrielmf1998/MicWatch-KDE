@@ -16,7 +16,8 @@ METER_NODE_NAME = "MicWatch Meter"
 
 DEFAULTS: dict = {
     # --- appearance ---
-    "icon_style": "mic",          # mic | mic_filled | badge | dot | ring | bars
+    "icon_style": "mic",          # see icons.ICON_STYLES
+    "icon_size": 1.0,             # 0.5 .. 1.0 of the tray slot
     "color_idle": "#6e7681",      # nothing is recording
     "color_standby": "#e3b341",   # mic open, but below the threshold
     "color_active": "#3fb950",    # mic open and above the threshold

@@ -1,5 +1,5 @@
 Name:           micwatch-kde
-Version:        1.0.0
+Version:        1.0.1
 Release:        1%{?dist}
 Summary:        Microphone in-use tray indicator with a user-defined threshold
 
@@ -51,5 +51,8 @@ install -Dm 0644 README.md %{buildroot}%{_datadir}/doc/%{name}/README.md
 %{_datadir}/icons/hicolor/*/apps/micwatch.*
 
 %changelog
+* Tue Sep 01 2026 Gabriel Marques Ferrarezi <110578985+gabrielmf1998@users.noreply.github.com> - 1.0.1-1
+- Bigger icons: every style now fills the tray slot, plus an Icon size slider
+
 * Mon Aug 31 2026 Gabriel Marques Ferrarezi <110578985+gabrielmf1998@users.noreply.github.com> - 1.0.0-1
 - First release: dBFS threshold, 18 icon styles, 15 animations, autostart switch
