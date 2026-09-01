@@ -181,6 +181,9 @@ class MicMonitor(QObject):
             self.changed.emit(counted)
 
     def preferred_source(self) -> str:
+        chosen = self.config.get("meter_source", "auto")
+        if chosen and chosen != "auto":
+            return chosen
         for stream in self.streams:
             if not stream.virtual and stream.source:
                 return stream.source

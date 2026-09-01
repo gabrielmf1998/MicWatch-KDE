@@ -6,9 +6,10 @@ import math
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, Qt, QTimer
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QColorDialog,
     QComboBox,
@@ -24,12 +25,14 @@ from PySide6.QtWidgets import (
     QSlider,
     QSpinBox,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from . import icons
-from .config import APP_NAME, DEFAULTS
+from .audio import list_sources
+from .config import APP_NAME, MIN_DB
 
 AUTOSTART_FILE = (
     Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
@@ -39,46 +42,52 @@ AUTOSTART_FILE = (
 
 PRESETS = [
     ("#3fb950", "Green"),
+    ("#00e676", "Neon green"),
     ("#e5534b", "Red"),
+    ("#ff5c8a", "Hot pink"),
     ("#e3b341", "Amber"),
+    ("#ff9800", "Orange"),
     ("#58a6ff", "Blue"),
-    ("#bc8cff", "Purple"),
-    ("#f778ba", "Pink"),
     ("#2ee6d6", "Teal"),
+    ("#bc8cff", "Purple"),
     ("#ffffff", "White"),
     ("#6e7681", "Grey"),
+    ("#3a3f46", "Dark grey"),
 ]
 
 
 def to_db(value: float) -> float:
-    return -96.0 if value <= 0.00002 else 20.0 * math.log10(value)
+    return MIN_DB if value <= 0.000001 else max(MIN_DB, 20.0 * math.log10(value))
+
+
+def db_fraction(db: float) -> float:
+    return max(0.0, min(1.0, (db - MIN_DB) / (0.0 - MIN_DB)))
 
 
 class LevelBar(QWidget):
-    """Live input level with the threshold drawn on top of it."""
+    """Live input level on a dB scale, with the threshold drawn on top."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.level = 0.0
-        self.peak = 0.0
-        self.threshold = 0.02
-        self.active = False
-        self.setMinimumHeight(30)
+        self.peak_db = MIN_DB
+        self.threshold_db = -42.0
+        self.setMinimumHeight(38)
         self._decay = QTimer(self)
         self._decay.timeout.connect(self._fade)
-        self._decay.start(80)
+        self._decay.start(60)
 
     def _fade(self) -> None:
-        self.peak = max(self.level, self.peak * 0.94)
+        self.peak_db = max(to_db(self.level), self.peak_db - 1.2)
         self.update()
 
     def set_level(self, value: float) -> None:
         self.level = value
-        self.peak = max(self.peak, value)
+        self.peak_db = max(self.peak_db, to_db(value))
         self.update()
 
-    def set_threshold(self, value: float) -> None:
-        self.threshold = value
+    def set_threshold(self, db: float) -> None:
+        self.threshold_db = db
         self.update()
 
     def paintEvent(self, event) -> None:
@@ -86,24 +95,28 @@ class LevelBar(QWidget):
         p.setRenderHint(QPainter.Antialiasing, True)
         rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(0, 0, 0, 60))
+        p.setBrush(QColor(0, 0, 0, 130))
         p.drawRoundedRect(rect, 5, 5)
 
-        scale = 0.35  # full bar == 35% RMS, plenty of headroom for speech
-        filled = min(1.0, self.level / scale)
+        db = to_db(self.level)
         bar = QRectF(rect)
-        bar.setWidth(rect.width() * filled)
-        colour = QColor("#3fb950") if self.level >= self.threshold else QColor("#8b949e")
-        p.setBrush(colour)
+        bar.setWidth(rect.width() * db_fraction(db))
+        above = db >= self.threshold_db
+        p.setBrush(QColor("#3fb950") if above else QColor("#4c8fd6"))
         p.drawRoundedRect(bar, 5, 5)
 
-        peak_x = rect.left() + rect.width() * min(1.0, self.peak / scale)
-        p.setBrush(QColor(255, 255, 255, 150))
+        p.setBrush(QColor(255, 255, 255, 170))
+        peak_x = rect.left() + rect.width() * db_fraction(self.peak_db)
         p.drawRect(QRectF(peak_x - 1.5, rect.top(), 3, rect.height()))
 
-        thr_x = rect.left() + rect.width() * min(1.0, self.threshold / scale)
+        thr_x = rect.left() + rect.width() * db_fraction(self.threshold_db)
         p.setBrush(QColor("#e3b341"))
-        p.drawRect(QRectF(thr_x - 1.5, rect.top() - 1, 3, rect.height() + 2))
+        p.drawRect(QRectF(thr_x - 2, rect.top() - 2, 4, rect.height() + 4))
+
+        p.setPen(QColor(255, 255, 255, 110))
+        for mark in (-60, -50, -40, -30, -20, -10):
+            x = rect.left() + rect.width() * db_fraction(mark)
+            p.drawLine(int(x), int(rect.bottom() - 5), int(x), int(rect.bottom()))
         p.end()
 
 
@@ -115,14 +128,14 @@ class IconPreview(QWidget):
         self.config = config
         self.level = 0.0
         self._phase = 0.0
-        self.setMinimumHeight(96)
+        self.setMinimumHeight(100)
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(50)
+        self._timer.start(40)
 
     def _tick(self) -> None:
         speed = max(0.1, float(self.config["animation_speed"]))
-        self._phase = (self._phase + 0.05 * speed * 0.8) % 1.0
+        self._phase = (self._phase + 0.04 * speed * 0.8) % 1.0
         self.update()
 
     def paintEvent(self, event) -> None:
@@ -130,36 +143,28 @@ class IconPreview(QWidget):
         p.setRenderHint(QPainter.Antialiasing, True)
         labels = ["Idle", "Open (quiet)", "In use"]
         keys = ["color_idle", "color_standby", "color_active"]
-        size = 56
+        size = 58
         step = self.width() / 3
-        wave = 0.5 + 0.5 * math.sin(self._phase * 2 * math.pi)
         for i, (label, key) in enumerate(zip(labels, keys)):
-            scale, alpha, glow = 1.0, 1.0, 0.0
-            level = 0.25
+            level = 0.30
             if i == 2:
-                anim = self.config["animation"]
-                level = max(0.18, self.level)
-                if anim == "pulse":
-                    scale = 0.92 + 0.14 * wave
-                elif anim == "blink":
-                    alpha = 1.0 if self._phase < 0.5 else 0.2
-                elif anim == "glow":
-                    glow = 0.35 + 0.65 * wave
-                elif anim == "level":
-                    boost = min(1.0, self.level * 6.0)
-                    scale = 0.94 + 0.16 * boost
-                    glow = 0.25 + 0.6 * boost
+                state = icons.anim_state(
+                    self.config["animation"], self._phase, max(0.05, self.level)
+                )
+                level = max(0.10, self.level)
             elif i == 1:
-                alpha = 0.9
+                state = icons.AnimState(alpha=0.85)
+                level = 0.06
                 if not self.config["show_standby"]:
                     key = "color_idle"
+            else:
+                state = icons.AnimState(alpha=0.75)
+                level = 0.0
             pixmap = icons.render_pixmap(
                 self.config["icon_style"],
                 QColor(self.config[key]),
                 level=level,
-                scale=scale,
-                alpha=alpha,
-                glow=glow,
+                state=state,
                 px=size * 2,
             )
             x = step * i + step / 2 - size / 2
@@ -192,8 +197,10 @@ class SettingsWindow(QWidget):
         super().__init__()
         self.config = config
         self.tray = tray
+        self._calibrating = False
+        self._calibration_peak = 0.0
         self.setWindowTitle(f"{APP_NAME} — Settings")
-        self.resize(520, 620)
+        self.resize(560, 720)
         self.setWindowIcon(
             icons.render_icon(config["icon_style"], QColor(config["color_active"]))
         )
@@ -223,32 +230,40 @@ class SettingsWindow(QWidget):
     # -- tabs ------------------------------------------------------------
     def _appearance_tab(self) -> QWidget:
         page = QWidget()
-        form = QFormLayout(page)
+        layout = QVBoxLayout(page)
 
-        self.style_box = QComboBox()
-        for key, label in icons.ICON_STYLES:
-            self.style_box.addItem(label, key)
-        self.style_box.setCurrentIndex(
-            max(0, self.style_box.findData(self.config["icon_style"]))
-        )
-        self.style_box.currentIndexChanged.connect(
-            lambda: self._set("icon_style", self.style_box.currentData())
-        )
-        form.addRow("Icon style", self.style_box)
+        box = QGroupBox("Icon")
+        grid = QGridLayout(box)
+        grid.setSpacing(4)
+        self._style_group = QButtonGroup(self)
+        self._style_buttons = {}
+        columns = 6
+        for i, (key, label) in enumerate(icons.ICON_STYLES):
+            button = QToolButton()
+            button.setCheckable(True)
+            button.setAutoRaise(True)
+            button.setToolTip(label)
+            button.setIconSize(QSize(30, 30))
+            button.setChecked(key == self.config["icon_style"])
+            button.clicked.connect(lambda _=False, k=key: self._set("icon_style", k))
+            self._style_group.addButton(button)
+            self._style_buttons[key] = button
+            grid.addWidget(button, i // columns, i % columns)
+        layout.addWidget(box)
+        self._refresh_style_icons()
 
+        form = QFormLayout()
         self.anim_box = QComboBox()
         for key, label in icons.ANIMATIONS:
             self.anim_box.addItem(label, key)
-        self.anim_box.setCurrentIndex(
-            max(0, self.anim_box.findData(self.config["animation"]))
-        )
+        self.anim_box.setCurrentIndex(max(0, self.anim_box.findData(self.config["animation"])))
         self.anim_box.currentIndexChanged.connect(
             lambda: self._set("animation", self.anim_box.currentData())
         )
         form.addRow("Animation", self.anim_box)
 
         self.speed = QDoubleSpinBox()
-        self.speed.setRange(0.25, 3.0)
+        self.speed.setRange(0.25, 4.0)
         self.speed.setSingleStep(0.25)
         self.speed.setValue(float(self.config["animation_speed"]))
         self.speed.valueChanged.connect(lambda v: self._set("animation_speed", float(v)))
@@ -260,9 +275,10 @@ class SettingsWindow(QWidget):
         self.fps.setValue(int(self.config["animation_fps"]))
         self.fps.valueChanged.connect(lambda v: self._set("animation_fps", int(v)))
         form.addRow("Refresh rate", self.fps)
+        layout.addLayout(form)
 
         colours = QGroupBox("Colours")
-        grid = QGridLayout(colours)
+        cgrid = QGridLayout(colours)
         self._color_widgets = {}
         rows = [
             ("color_idle", "Idle"),
@@ -270,7 +286,7 @@ class SettingsWindow(QWidget):
             ("color_active", "In use"),
         ]
         for row, (key, label) in enumerate(rows):
-            grid.addWidget(QLabel(label), row, 0)
+            cgrid.addWidget(QLabel(label), row, 0)
             button = ColorButton(self.config[key])
             edit = QLineEdit(self.config[key])
             edit.setMaximumWidth(90)
@@ -281,18 +297,19 @@ class SettingsWindow(QWidget):
             button.clicked.connect(lambda _=False, k=key: self._pick_color(k))
             edit.editingFinished.connect(lambda k=key: self._hex_entered(k))
             presets.currentIndexChanged.connect(
-                lambda _=0, k=key, box=presets: self._preset_picked(k, box)
+                lambda _=0, k=key, b=presets: self._preset_picked(k, b)
             )
-            grid.addWidget(button, row, 1)
-            grid.addWidget(edit, row, 2)
-            grid.addWidget(presets, row, 3)
+            cgrid.addWidget(button, row, 1)
+            cgrid.addWidget(edit, row, 2)
+            cgrid.addWidget(presets, row, 3)
             self._color_widgets[key] = (button, edit, presets)
-        form.addRow(colours)
+        layout.addWidget(colours)
 
         self.shade = QCheckBox("Brighten from “open” to “in use” as the level rises")
         self.shade.setChecked(bool(self.config["shade_by_level"]))
         self.shade.toggled.connect(lambda v: self._set("shade_by_level", bool(v)))
-        form.addRow(self.shade)
+        layout.addWidget(self.shade)
+        layout.addStretch(1)
         return page
 
     def _detection_tab(self) -> QWidget:
@@ -301,16 +318,29 @@ class SettingsWindow(QWidget):
 
         self.threshold_on = QCheckBox("Only light up above a level threshold")
         self.threshold_on.setChecked(bool(self.config["threshold_enabled"]))
-        self.threshold_on.toggled.connect(self._threshold_toggled)
+        self.threshold_on.toggled.connect(lambda v: self._set("threshold_enabled", bool(v)))
         layout.addWidget(self.threshold_on)
 
         hint = QLabel(
-            "With this off, the icon lights up as soon as an app opens the microphone.\n"
-            "With it on, MicWatch also measures the signal, so the icon only lights up\n"
-            "when sound actually goes through."
+            "Off: the icon lights up as soon as an app opens the microphone.\n"
+            "On: MicWatch also measures the signal, so it lights up only when sound "
+            "actually goes through."
         )
         hint.setStyleSheet("color: #8b949e;")
         layout.addWidget(hint)
+
+        device_row = QFormLayout()
+        self.device = QComboBox()
+        self.device.addItem("Follow the app that is recording", "auto")
+        for source in list_sources().values():
+            if source.real or source.virtual:
+                self.device.addItem(source.description, source.name)
+        self.device.setCurrentIndex(max(0, self.device.findData(self.config["meter_source"])))
+        self.device.currentIndexChanged.connect(
+            lambda: self._set("meter_source", self.device.currentData())
+        )
+        device_row.addRow("Measure", self.device)
+        layout.addLayout(device_row)
 
         self.live = QCheckBox("Live meter (keeps the microphone open while this window is open)")
         self.live.setChecked(True)
@@ -318,23 +348,30 @@ class SettingsWindow(QWidget):
         layout.addWidget(self.live)
 
         self.bar = LevelBar()
-        self.bar.set_threshold(float(self.config["threshold"]))
+        self.bar.set_threshold(float(self.config["threshold_db"]))
         layout.addWidget(self.bar)
+
+        self.readout = QLabel()
+        self.readout.setStyleSheet("color: #8b949e;")
+        layout.addWidget(self.readout)
 
         row = QHBoxLayout()
         self.threshold = QSlider(Qt.Horizontal)
-        self.threshold.setRange(0, 1000)
-        self.threshold.setValue(self._to_slider(float(self.config["threshold"])))
+        self.threshold.setRange(int(MIN_DB), 0)
+        self.threshold.setValue(int(round(float(self.config["threshold_db"]))))
         self.threshold.valueChanged.connect(self._threshold_moved)
         self.threshold_label = QLabel()
-        self.threshold_label.setMinimumWidth(130)
-        calibrate = QPushButton("Set just above noise")
-        calibrate.setToolTip("Stay quiet, then click: the threshold lands above the room noise.")
-        calibrate.clicked.connect(self._calibrate)
+        self.threshold_label.setMinimumWidth(80)
+        self.calibrate = QPushButton("Set just above noise")
+        self.calibrate.setToolTip(
+            "Stay quiet and click: MicWatch listens for 3 seconds and parks the "
+            "threshold just above your room noise."
+        )
+        self.calibrate.clicked.connect(self._calibrate)
         row.addWidget(QLabel("Threshold"))
         row.addWidget(self.threshold, 1)
         row.addWidget(self.threshold_label)
-        row.addWidget(calibrate)
+        row.addWidget(self.calibrate)
         layout.addLayout(row)
         self._update_threshold_label()
 
@@ -352,7 +389,7 @@ class SettingsWindow(QWidget):
         self.smooth.setSingleStep(0.05)
         self.smooth.setValue(float(self.config["smoothing"]))
         self.smooth.valueChanged.connect(lambda v: self._set("smoothing", float(v)))
-        form.addRow("Smoothing", self.smooth)
+        form.addRow("Release smoothing", self.smooth)
         layout.addLayout(form)
 
         line = QFrame()
@@ -432,37 +469,42 @@ class SettingsWindow(QWidget):
         return page
 
     # -- helpers ---------------------------------------------------------
-    @staticmethod
-    def _to_slider(value: float) -> int:
-        return int(round(math.sqrt(max(0.0, value) / 0.5) * 1000))
-
-    @staticmethod
-    def _from_slider(value: int) -> float:
-        return (value / 1000.0) ** 2 * 0.5
+    def _refresh_style_icons(self) -> None:
+        colour = QColor(self.config["color_active"])
+        for key, button in self._style_buttons.items():
+            button.setIcon(icons.render_icon(key, colour, level=0.22, px=96))
+            button.setChecked(key == self.config["icon_style"])
 
     def _update_threshold_label(self) -> None:
-        value = float(self.config["threshold"])
-        self.threshold_label.setText(f"{value * 100:.2f}%  ({to_db(value):.1f} dB)")
+        db = float(self.config["threshold_db"])
+        self.threshold_label.setText(f"{db:.0f} dB")
 
     def _threshold_moved(self, value: int) -> None:
-        threshold = self._from_slider(value)
-        self.config["threshold"] = threshold
-        self.bar.set_threshold(threshold)
+        self.config["threshold_db"] = float(value)
+        self.bar.set_threshold(float(value))
         self._update_threshold_label()
         self._apply()
 
-    def _threshold_toggled(self, enabled: bool) -> None:
-        self._set("threshold_enabled", bool(enabled))
-
     def _calibrate(self) -> None:
-        floor = max(self.bar.peak, self.bar.level)
-        threshold = max(0.004, min(0.4, floor * 1.8 + 0.003))
-        self.threshold.setValue(self._to_slider(threshold))
+        if self._calibrating:
+            return
+        if not self.live.isChecked():
+            self.live.setChecked(True)
+        self._calibrating = True
+        self._calibration_peak = 0.0
+        self.calibrate.setEnabled(False)
+        self.calibrate.setText("Listening…")
+        QTimer.singleShot(3000, self._finish_calibration)
+
+    def _finish_calibration(self) -> None:
+        self._calibrating = False
+        self.calibrate.setEnabled(True)
+        self.calibrate.setText("Set just above noise")
+        noise_db = to_db(self._calibration_peak)
+        self.threshold.setValue(int(round(min(-6.0, max(MIN_DB + 2, noise_db + 7.0)))))
 
     def _pick_color(self, key: str) -> None:
-        chosen = QColorDialog.getColor(
-            QColor(self.config[key]), self, "Pick a colour", QColorDialog.ShowAlphaChannel
-        )
+        chosen = QColorDialog.getColor(QColor(self.config[key]), self, "Pick a colour")
         if chosen.isValid():
             self._set_color(key, chosen.name())
 
@@ -493,13 +535,12 @@ class SettingsWindow(QWidget):
     def _set_autostart(self, enabled: bool) -> None:
         if enabled:
             AUTOSTART_FILE.parent.mkdir(parents=True, exist_ok=True)
-            exec_path = Path.home() / ".local" / "bin" / "micwatch"
             AUTOSTART_FILE.write_text(
                 "[Desktop Entry]\n"
                 "Type=Application\n"
                 f"Name={APP_NAME}\n"
                 "Comment=Microphone in-use tray indicator\n"
-                f"Exec={exec_path}\n"
+                f"Exec={Path.home() / '.local' / 'bin' / 'micwatch'}\n"
                 "Icon=audio-input-microphone\n"
                 "Terminal=false\n"
                 "X-GNOME-Autostart-enabled=true\n",
@@ -522,9 +563,18 @@ class SettingsWindow(QWidget):
     def _on_level(self, value: float) -> None:
         self.bar.set_level(value)
         self.preview.level = value
+        if self._calibrating:
+            self._calibration_peak = max(self._calibration_peak, value)
+        db = to_db(value)
+        state = self.tray.state
+        self.readout.setText(
+            f"Now: {db:6.1f} dB     peak {self.bar.peak_db:6.1f} dB     state: {state}"
+        )
 
     def _set(self, key: str, value) -> None:
         self.config[key] = value
+        if key in ("icon_style", "color_active"):
+            self._refresh_style_icons()
         self._apply()
 
     def _apply(self) -> None:

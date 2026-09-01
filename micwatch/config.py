@@ -9,6 +9,8 @@ from pathlib import Path
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "micwatch"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
+MIN_DB = -60.0
+
 APP_NAME = "MicWatch"
 METER_NODE_NAME = "MicWatch Meter"
 
@@ -18,10 +20,10 @@ DEFAULTS: dict = {
     "color_idle": "#6e7681",      # nothing is recording
     "color_standby": "#e3b341",   # mic open, but below the threshold
     "color_active": "#3fb950",    # mic open and above the threshold
-    "animation": "pulse",         # none | pulse | blink | glow | level
+    "animation": "glow",          # see icons.ANIMATIONS
     "animation_speed": 1.0,       # 0.25 .. 3.0
     "animation_fps": 20,
-    "shade_by_level": True,       # blend standby -> active colour with the level
+    "shade_by_level": False,      # blend standby -> active colour with the level
 
     # --- behaviour ---
     "hide_when_idle": False,
@@ -30,9 +32,10 @@ DEFAULTS: dict = {
 
     # --- detection ---
     "threshold_enabled": True,
-    "threshold": 0.02,            # linear RMS, 0.0 .. 1.0
+    "threshold_db": -42.0,        # dBFS, -60 (very sensitive) .. 0
+    "meter_source": "auto",       # "auto" = follow the app that is recording
     "hold_ms": 700,               # keep it lit this long after dropping below
-    "smoothing": 0.35,            # 0 = raw, 0.9 = very smooth
+    "smoothing": 0.45,            # release smoothing; attack is always fast
     "ignore_corked": True,        # ignore paused streams
     "include_virtual": False,     # count virtual sources (screen-share, loopback)
     "ignore_apps": [],            # lower-case app names to never count
@@ -71,6 +74,7 @@ class Config:
         except (OSError, ValueError):
             return
         if isinstance(raw, dict):
+            raw.pop("threshold", None)  # 1.0 stored a linear threshold; dB replaces it
             for key, value in raw.items():
                 if key in DEFAULTS and isinstance(value, type(DEFAULTS[key])):
                     self._data[key] = value

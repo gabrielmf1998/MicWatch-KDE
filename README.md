@@ -20,16 +20,23 @@ device, even when nothing is going through it. MicWatch separates the two:
 
 ## Features
 
-- **6 icon styles** — outline mic, solid mic, badge, dot, ring meter, level bars.
-- **5 animations** — none, pulse, blink, glow halo, or follow-the-level.
-- **Full colour control** — one colour per state, hex field, colour picker and presets.
-- **User-defined threshold** — with a live meter, a dB/% readout and a
-  *Set just above noise* button that parks the threshold above your room noise.
+- **18 icon styles** — microphone (outline/solid/circle/badge), headset mic, studio mic,
+  dot, dot with ring, LED tile, record, ring meter, double ring, gauge, level bars,
+  wide bars, waveform, signal waves and heartbeat line. Picked from a visual grid.
+- **15 animations** — none, pulse, breathe, blink, fast strobe, glow halo, ripple rings,
+  bounce, wobble, spin, heartbeat, follow-the-level, glow-with-the-level, rainbow, siren.
+- **Full colour control** — one colour per state, hex field, colour picker and 12 presets.
+- **User-defined threshold in dBFS** — live meter on a dB scale (−60 … 0 dB), a numeric
+  readout, and a *Set just above noise* button that listens for 3 s and parks the
+  threshold 7 dB above your room noise.
+- **Pick which input to measure** — follow the recording app, or pin one device.
 - **Hold time** so the icon does not flicker between words.
 - Ignores monitor-of-sink streams; virtual sources (screen share, loopback) are opt-in.
 - Ignore list for apps you do not care about (`easyeffects`, `obs`, …).
 - Optional: hide the icon completely while nothing is recording.
 - Tooltip and menu show **which** applications are recording and from which device.
+- Fast attack / adjustable release, so the icon reacts on the first syllable and does not
+  strobe between words.
 
 ## Requirements
 
@@ -49,6 +56,9 @@ To avoid two microphone icons, disable Plasma's own:
 **System Settings → Quick Settings → System Tray → Entries → Microphone → Disabled**.
 
 ## How it works
+
+Levels are RMS per 30 ms block, converted to dBFS. A quiet room measures around −50 dB
+and speech lands between −35 and −20 dB, which is why the default threshold is −42 dB.
 
 - `pactl subscribe` + `pactl -f json list source-outputs` tell MicWatch *who* is
   recording and from which source (streams reading a sink monitor are not microphone use).

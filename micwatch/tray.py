@@ -11,13 +11,23 @@ from PySide6.QtWidgets import QMenu, QMessageBox, QSystemTrayIcon
 
 from . import icons
 from .audio import LevelMeter, MicMonitor
-from .config import APP_NAME
+from .config import APP_NAME, MIN_DB
 
 IDLE, STANDBY, ACTIVE = "idle", "standby", "active"
 
+# styles whose drawing reacts to the level, so they need repainting as it moves
+REACTIVE_STYLES = {
+    "dot", "dot_ring", "led", "record", "ring", "ring_dual", "gauge",
+    "bars", "bars_wide", "waveform", "radar", "pulse_line", "mic_boom",
+}
+
+
+def to_db(level: float) -> float:
+    return MIN_DB if level <= 0.000001 else max(MIN_DB, 20.0 * math.log10(level))
+
 
 class MicWatchTray(QObject):
-    level_changed = Signal(float)     # smoothed level, for the settings meter
+    level_changed = Signal(float)     # smoothed linear level, for the settings meter
     state_changed = Signal(str)
 
     def __init__(self, config, parent=None) -> None:
@@ -90,9 +100,13 @@ class MicWatchTray(QObject):
         self._refresh_all()
 
     def _on_level(self, value: float) -> None:
-        smoothing = max(0.0, min(0.95, float(self.config["smoothing"])))
-        self.level = self.level * smoothing + value * (1.0 - smoothing)
-        if self.level >= float(self.config["threshold"]):
+        # fast attack, configurable release: the icon reacts the instant you speak
+        if value > self.level:
+            self.level = self.level * 0.25 + value * 0.75
+        else:
+            release = max(0.0, min(0.95, float(self.config["smoothing"])))
+            self.level = self.level * release + value * (1.0 - release)
+        if to_db(self.level) >= float(self.config["threshold_db"]):
             self._last_above = time.monotonic()
         self.level_changed.emit(self.level)
         self._evaluate()
@@ -123,7 +137,7 @@ class MicWatchTray(QObject):
             state = ACTIVE
         else:
             hold = max(0.0, float(self.config["hold_ms"]) / 1000.0)
-            above = self.level >= float(self.config["threshold"])
+            above = to_db(self.level) >= float(self.config["threshold_db"])
             state = ACTIVE if above or (time.monotonic() - self._last_above) <= hold else STANDBY
 
         changed = state != self.state
@@ -137,8 +151,10 @@ class MicWatchTray(QObject):
 
     def _sync_animation(self) -> None:
         animated = self.state == ACTIVE and self.config["animation"] != "none"
-        reactive = self.state in (ACTIVE, STANDBY) and self.config["icon_style"] in (
-            "bars", "ring", "dot"
+        reactive = (
+            self.state in (ACTIVE, STANDBY)
+            and self.config["icon_style"] in REACTIVE_STYLES
+            and (self.config["threshold_enabled"] or self._preview)
         )
         shading = (
             self.state == ACTIVE
@@ -172,9 +188,9 @@ class MicWatchTray(QObject):
         if self.state == STANDBY:
             return standby if self.config["show_standby"] else idle
         if self.config["shade_by_level"] and self.config["threshold_enabled"]:
-            threshold = max(0.001, float(self.config["threshold"]))
-            ratio = min(1.0, (self.level - threshold) / max(0.02, threshold * 4))
-            return icons.blend(standby, active, max(0.35, ratio))
+            headroom = max(3.0, abs(float(self.config["threshold_db"])) * 0.5)
+            over = to_db(self.level) - float(self.config["threshold_db"])
+            return icons.blend(standby, active, max(0.35, min(1.0, over / headroom)))
         return active
 
     def _paint(self) -> None:
@@ -185,37 +201,28 @@ class MicWatchTray(QObject):
         if not self.tray.isVisible():
             self.tray.show()
 
-        scale, alpha, glow = 1.0, 1.0, 0.0
         if self.state == ACTIVE:
-            anim = self.config["animation"]
-            wave = 0.5 + 0.5 * math.sin(self._phase * 2 * math.pi)
-            if anim == "pulse":
-                scale = 0.92 + 0.14 * wave
-            elif anim == "blink":
-                alpha = 1.0 if self._phase < 0.5 else 0.2
-            elif anim == "glow":
-                glow = 0.35 + 0.65 * wave
-            elif anim == "level":
-                boost = min(1.0, self.level * 6.0)
-                scale = 0.94 + 0.16 * boost
-                glow = 0.25 + 0.6 * boost
+            state = icons.anim_state(self.config["animation"], self._phase, self.level)
         elif self.state == STANDBY:
-            alpha = 0.9
+            state = icons.AnimState(alpha=0.85)
+        else:
+            state = icons.AnimState(alpha=0.75)
 
-        pixmap = icons.render_pixmap(
-            self.config["icon_style"],
-            self._colors(),
-            level=self.level if self.config["threshold_enabled"] or self._preview else 0.35,
-            scale=scale,
-            alpha=alpha,
-            glow=glow,
+        metering = self.meter.running or self._preview
+        self.tray.setIcon(
+            QIcon(
+                icons.render_pixmap(
+                    self.config["icon_style"],
+                    self._colors(),
+                    level=self.level if metering else (0.28 if self.state == ACTIVE else 0.0),
+                    state=state,
+                )
+            )
         )
-        self.tray.setIcon(QIcon(pixmap))
 
     def _update_tooltip(self) -> None:
-        streams = self.monitor.streams
         names: list[str] = []
-        for stream in streams:
+        for stream in self.monitor.streams:
             if stream.app not in names:
                 names.append(stream.app)
         joined = ", ".join(names)
@@ -226,7 +233,7 @@ class MicWatchTray(QObject):
         else:
             text = f"Microphone in use — {joined}"
         if self.config["tooltip_show_level"] and (self.meter.running or self._preview):
-            text += f"\nLevel: {self.level * 100:5.1f}%"
+            text += f"\nLevel: {to_db(self.level):.0f} dB (threshold {float(self.config['threshold_db']):.0f} dB)"
         self.tray.setToolTip(text)
         self._status_action.setText(text.replace("\n", "  ·  "))
 
@@ -234,6 +241,7 @@ class MicWatchTray(QObject):
     def set_preview(self, enabled: bool) -> None:
         self._preview = enabled
         self._refresh_all()
+        self._sync_animation()
 
     def apply_config(self) -> None:
         self.monitor.apply_config()
