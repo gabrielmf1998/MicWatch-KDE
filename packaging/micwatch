@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""System launcher for MicWatch (packaged installs)."""
+import sys
+
+sys.path.insert(0, "/usr/share/micwatch-kde")
+
+from micwatch.main import main
+
+sys.exit(main())
