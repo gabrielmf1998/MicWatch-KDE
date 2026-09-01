@@ -9,7 +9,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QIcon
 from PySide6.QtWidgets import QMenu, QMessageBox, QSystemTrayIcon
 
-from . import icons
+from . import autostart, icons
 from .audio import LevelMeter, MicMonitor
 from .config import APP_NAME, MIN_DB
 
@@ -71,6 +71,12 @@ class MicWatchTray(QObject):
         settings_action.triggered.connect(self.open_settings)
         menu.addAction(settings_action)
 
+        self._autostart_action = QAction("Start on login", menu)
+        self._autostart_action.setCheckable(True)
+        self._autostart_action.setChecked(autostart.is_enabled())
+        self._autostart_action.toggled.connect(self._toggle_autostart)
+        menu.addAction(self._autostart_action)
+
         about_action = QAction(f"About {APP_NAME}", menu)
         about_action.triggered.connect(self._about)
         menu.addAction(about_action)
@@ -82,6 +88,24 @@ class MicWatchTray(QObject):
 
         self.menu = menu
         self.tray.setContextMenu(menu)
+
+    def _toggle_autostart(self, enabled: bool) -> None:
+        result = autostart.set_enabled(enabled)
+        if result != enabled:
+            self.sync_autostart_action()
+        window = self._settings
+        if window is not None and hasattr(window, "autostart"):
+            window.autostart.blockSignals(True)
+            window.autostart.setChecked(result)
+            window.autostart.blockSignals(False)
+            window.autostart_note.setText(autostart.describe())
+
+    def sync_autostart_action(self) -> None:
+        enabled = autostart.is_enabled()
+        if self._autostart_action.isChecked() != enabled:
+            self._autostart_action.blockSignals(True)
+            self._autostart_action.setChecked(enabled)
+            self._autostart_action.blockSignals(False)
 
     def _about(self) -> None:
         QMessageBox.information(

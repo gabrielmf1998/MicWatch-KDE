@@ -50,7 +50,17 @@ device, even when nothing is going through it. MicWatch separates the two:
 micwatch         # run it
 ```
 
-Enable *Start automatically on login* in **Behaviour** to autostart.
+### Start with the session
+
+Two equivalent switches, both writing `~/.config/autostart/micwatch.desktop`:
+
+- right-click the tray icon → **Start on login**
+- **Settings → Behaviour → Startup → Start MicWatch automatically on login**
+
+The entry points at `~/.local/bin/micwatch` when the launcher is installed, and falls back
+to `env PYTHONPATH=<repo> python3 -m micwatch` when running straight from a clone. It also
+shows up in **System Settings → Autostart**, and a single-instance lock keeps a second copy
+from starting if one is already running.
 
 To avoid two microphone icons, disable Plasma's own:
 **System Settings → Quick Settings → System Tray → Entries → Microphone → Disabled**.

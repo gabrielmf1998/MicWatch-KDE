@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import math
-import os
-from pathlib import Path
 
 from PySide6.QtCore import QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPixmap
@@ -30,15 +28,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import icons
+from . import autostart, icons
 from .audio import list_sources
 from .config import APP_NAME, MIN_DB
-
-AUTOSTART_FILE = (
-    Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    / "autostart"
-    / "micwatch.desktop"
-)
 
 PRESETS = [
     ("#3fb950", "Green"),
@@ -429,6 +421,18 @@ class SettingsWindow(QWidget):
         page = QWidget()
         layout = QVBoxLayout(page)
 
+        startup = QGroupBox("Startup")
+        startup_layout = QVBoxLayout(startup)
+        self.autostart = QCheckBox("Start MicWatch automatically on login")
+        self.autostart.setChecked(autostart.is_enabled())
+        self.autostart.toggled.connect(self._set_autostart)
+        startup_layout.addWidget(self.autostart)
+        self.autostart_note = QLabel(autostart.describe())
+        self.autostart_note.setWordWrap(True)
+        self.autostart_note.setStyleSheet("color: #8b949e;")
+        startup_layout.addWidget(self.autostart_note)
+        layout.addWidget(startup)
+
         self.hide_idle = QCheckBox("Hide the icon when nothing is recording")
         self.hide_idle.setChecked(bool(self.config["hide_when_idle"]))
         self.hide_idle.toggled.connect(lambda v: self._set("hide_when_idle", bool(v)))
@@ -443,11 +447,6 @@ class SettingsWindow(QWidget):
         self.tip_level.setChecked(bool(self.config["tooltip_show_level"]))
         self.tip_level.toggled.connect(lambda v: self._set("tooltip_show_level", bool(v)))
         layout.addWidget(self.tip_level)
-
-        self.autostart = QCheckBox("Start automatically on login")
-        self.autostart.setChecked(AUTOSTART_FILE.exists())
-        self.autostart.toggled.connect(self._set_autostart)
-        layout.addWidget(self.autostart)
 
         form = QFormLayout()
         self.poll = QSpinBox()
@@ -533,21 +532,11 @@ class SettingsWindow(QWidget):
         self._set("ignore_apps", parts)
 
     def _set_autostart(self, enabled: bool) -> None:
-        if enabled:
-            AUTOSTART_FILE.parent.mkdir(parents=True, exist_ok=True)
-            AUTOSTART_FILE.write_text(
-                "[Desktop Entry]\n"
-                "Type=Application\n"
-                f"Name={APP_NAME}\n"
-                "Comment=Microphone in-use tray indicator\n"
-                f"Exec={Path.home() / '.local' / 'bin' / 'micwatch'}\n"
-                "Icon=audio-input-microphone\n"
-                "Terminal=false\n"
-                "X-GNOME-Autostart-enabled=true\n",
-                encoding="utf-8",
-            )
-        else:
-            AUTOSTART_FILE.unlink(missing_ok=True)
+        result = autostart.set_enabled(enabled)
+        self.autostart_note.setText(autostart.describe())
+        if result != enabled:
+            self.autostart.setChecked(result)
+        self.tray.sync_autostart_action()
 
     def _update_who(self) -> None:
         streams = self.tray.monitor.streams
