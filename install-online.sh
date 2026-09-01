@@ -5,8 +5,10 @@
 #   curl -fsSL https://raw.githubusercontent.com/gabrielmf1998/MicWatch-KDE/main/install-online.sh | sh
 set -eu
 
-BASE="https://github.com/gabrielmf1998/MicWatch-KDE/releases/latest/download"
-info() { printf '\033[1m==>\033[0m %s\n' "$*"; }
+REPO="gabrielmf1998/MicWatch-KDE"
+API="https://api.github.com/repos/$REPO/releases/latest"
+# everything informational goes to stderr: fetch() returns a path on stdout
+info() { printf '\033[1m==>\033[0m %s\n' "$*" >&2; }
 err()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 command -v curl >/dev/null 2>&1 || err "curl is required"
@@ -23,28 +25,40 @@ done
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
-fetch() { info "downloading $1"; curl -fL "$BASE/$1" -o "$tmp/$1" || err "download failed: $1"; }
+
+# Resolve an asset by suffix, so the installer survives version bumps.
+fetch() {
+    suffix="$1"
+    url="$(curl -fsSL "$API" \
+        | tr ',' '\n' | grep '"browser_download_url"' | cut -d'"' -f4 \
+        | grep -- "$suffix\$" | head -1)"
+    [ -n "$url" ] || err "no asset ending in '$suffix' in the latest release"
+    out="$tmp/${url##*/}"
+    info "downloading ${url##*/}"
+    curl -fL --progress-bar "$url" -o "$out" || err "download failed: $url"
+    printf '%s' "$out"
+}
 
 case "$fam" in
     rpm)
-        fetch micwatch-kde-1.0.0-1.fc46.noarch.rpm
+        pkg="$(fetch .noarch.rpm)"
         info "installing with dnf"
-        $SUDO dnf install -y "$tmp/micwatch-kde-1.0.0-1.fc46.noarch.rpm" ;;
+        $SUDO dnf install -y "$pkg" ;;
     deb)
-        fetch micwatch-kde_1.0.0-1_all.deb
+        pkg="$(fetch _all.deb)"
         info "installing with apt"
         $SUDO apt-get update -qq || true
-        $SUDO apt-get install -y "$tmp/micwatch-kde_1.0.0-1_all.deb" \
-            || { $SUDO dpkg -i "$tmp/micwatch-kde_1.0.0-1_all.deb"; $SUDO apt-get -f install -y; } ;;
+        $SUDO apt-get install -y "$pkg" \
+            || { $SUDO dpkg -i "$pkg"; $SUDO apt-get -f install -y; } ;;
     arch)
-        fetch micwatch-kde-1.0.0-1-any.pkg.tar.zst
+        pkg="$(fetch .pkg.tar.zst)"
         info "installing with pacman"
-        $SUDO pacman -U --noconfirm "$tmp/micwatch-kde-1.0.0-1-any.pkg.tar.zst" ;;
+        $SUDO pacman -U --noconfirm "$pkg" ;;
     *)
         info "unknown distro — installing the AppImage into ~/.local/bin"
-        fetch MicWatch-KDE-x86_64.AppImage
+        pkg="$(fetch .AppImage)"
         mkdir -p "$HOME/.local/bin" "$HOME/.local/share/applications"
-        install -m 0755 "$tmp/MicWatch-KDE-x86_64.AppImage" "$HOME/.local/bin/micwatch"
+        install -m 0755 "$pkg" "$HOME/.local/bin/micwatch"
         cat > "$HOME/.local/share/applications/micwatch.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
