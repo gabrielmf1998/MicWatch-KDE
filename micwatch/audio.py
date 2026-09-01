@@ -15,6 +15,7 @@ from .config import METER_NODE_NAME
 
 METER_RATE = 16000
 METER_BLOCK = 480          # 30 ms of mono audio
+METER_WARMUP = 10          # blocks to drop: the first buffers out of pw-cat are junk
 _REAL_SOURCE_CLASSES = {"Audio/Source"}
 _VIRTUAL_SOURCE_CLASSES = {"Audio/Source/Virtual"}
 
@@ -268,19 +269,35 @@ class LevelMeter(QObject):
             thread.join(timeout=1)
         self.level.emit(0.0)
 
+    def _read_exact(self, stream, nbytes: int) -> bytes | None:
+        """pw-cat writes to the pipe in partial chunks; a short read is not EOF."""
+        buf = bytearray()
+        while len(buf) < nbytes:
+            if self._stop.is_set():
+                return None
+            try:
+                chunk = stream.read(nbytes - len(buf))
+            except (OSError, ValueError):
+                return None
+            if not chunk:
+                return None
+            buf += chunk
+        return bytes(buf)
+
     def _reader(self) -> None:
         proc = self._proc
         if proc is None or proc.stdout is None:
             return
         nbytes = METER_BLOCK * 2
         samples = array.array("h")
+        warmup = METER_WARMUP
         while not self._stop.is_set():
-            try:
-                chunk = proc.stdout.read(nbytes)
-            except (OSError, ValueError):
+            chunk = self._read_exact(proc.stdout, nbytes)
+            if chunk is None:
                 break
-            if not chunk or len(chunk) < nbytes:
-                break
+            if warmup > 0:
+                warmup -= 1
+                continue
             del samples[:]
             samples.frombytes(chunk)
             total = 0

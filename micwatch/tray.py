@@ -45,6 +45,7 @@ class MicWatchTray(QObject):
         self.monitor.changed.connect(self._on_streams)
         self.meter = LevelMeter(self)
         self.meter.level.connect(self._on_level)
+        self.meter.failed.connect(self._on_meter_failed)
 
         self.tray = QSystemTrayIcon(self)
         self.tray.setToolTip(APP_NAME)
@@ -98,6 +99,15 @@ class MicWatchTray(QObject):
 
     def _on_streams(self, streams) -> None:
         self._refresh_all()
+
+    def _on_meter_failed(self, reason: str) -> None:
+        """The capture died (device unplugged, PipeWire restart): drop it and retry."""
+        self.meter.stop()
+        self.level = 0.0
+        self.level_changed.emit(0.0)
+        self._evaluate(force=True)
+        if self._wanted_meter_target():
+            QTimer.singleShot(1200, self._refresh_all)
 
     def _on_level(self, value: float) -> None:
         # fast attack, configurable release: the icon reacts the instant you speak
