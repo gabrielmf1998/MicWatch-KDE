@@ -31,6 +31,8 @@ class StreamInfo:
     source_desc: str
     corked: bool
     virtual: bool
+    muted: bool = False
+    volume: int = 100
 
 
 @dataclass
@@ -40,6 +42,44 @@ class SourceInfo:
     description: str
     real: bool
     virtual: bool
+    muted: bool = False
+
+
+def _volume_percent(entry: dict) -> int:
+    channels = (entry.get("volume") or {}).values()
+    best = 0
+    for channel in channels:
+        raw = str(channel.get("value_percent", "0%")).rstrip("%")
+        try:
+            best = max(best, int(float(raw)))
+        except ValueError:
+            pass
+    return best or 100
+
+
+def _call(args: list[str]) -> bool:
+    """Run a pactl command that produces no output; True when it succeeded."""
+    try:
+        return subprocess.run(args, capture_output=True, timeout=3).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def set_stream_mute(index: int, mute: bool) -> bool:
+    """Mute one application's capture stream, leaving every other app alone."""
+    return _call(["pactl", "set-source-output-mute", str(index), "1" if mute else "0"])
+
+
+def set_stream_volume(index: int, percent: int) -> bool:
+    percent = max(0, min(150, int(percent)))
+    return _call(["pactl", "set-source-output-volume", str(index), f"{percent}%"])
+
+
+def set_source_mute(name: str, mute: bool) -> bool:
+    """Mute the input device itself, for every application at once."""
+    if not name:
+        return False
+    return _call(["pactl", "set-source-mute", name, "1" if mute else "0"])
 
 
 def _run(args: list[str]) -> str:
@@ -73,6 +113,7 @@ def list_sources() -> dict[int, SourceInfo]:
             description=entry.get("description", "") or entry.get("name", ""),
             real=real,
             virtual=virtual,
+            muted=bool(entry.get("mute", False)),
         )
     return sources
 
@@ -108,6 +149,8 @@ def list_streams() -> tuple[list[StreamInfo], dict[int, SourceInfo]]:
                 source_desc=src.description,
                 corked=bool(entry.get("corked", False)),
                 virtual=src.virtual,
+                muted=bool(entry.get("mute", False)),
+                volume=_volume_percent(entry),
             )
         )
     return streams, sources
@@ -122,7 +165,9 @@ class MicMonitor(QObject):
         super().__init__(parent)
         self.config = config
         self.streams: list[StreamInfo] = []
+        self.all_streams: list[StreamInfo] = []
         self.sources: dict[int, SourceInfo] = {}
+        self._auto_muted: set[int] = set()
 
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
@@ -176,10 +221,45 @@ class MicMonitor(QObject):
     def refresh(self) -> None:
         streams, sources = list_streams()
         self.sources = sources
+        self.all_streams = [s for s in streams if METER_NODE_NAME not in (s.app, s.node_name)]
+        self._apply_remembered_mutes()
         counted = [s for s in streams if self._counts(s)]
         if counted != self.streams:
             self.streams = counted
             self.changed.emit(counted)
+
+    def _apply_remembered_mutes(self) -> None:
+        """Mute streams from apps the user muted before, once each."""
+        if not self.config.get("remember_mutes", True):
+            return
+        remembered = {a.lower() for a in self.config["muted_apps"]}
+        if not remembered:
+            self._auto_muted.clear()
+            return
+        alive = {s.index for s in self.all_streams}
+        self._auto_muted &= alive
+        for stream in self.all_streams:
+            if stream.index in self._auto_muted or stream.app.lower() not in remembered:
+                continue
+            self._auto_muted.add(stream.index)
+            if not stream.muted and set_stream_mute(stream.index, True):
+                stream.muted = True
+
+    def streams_of(self, app: str) -> list[StreamInfo]:
+        return [s for s in self.all_streams if s.app == app]
+
+    def recording_apps(self) -> list[str]:
+        names: list[str] = []
+        for stream in self.streams:
+            if stream.app not in names:
+                names.append(stream.app)
+        return names
+
+    def source_muted(self, name: str) -> bool:
+        for source in self.sources.values():
+            if source.name == name:
+                return source.muted
+        return False
 
     def preferred_source(self) -> str:
         chosen = self.config.get("meter_source", "auto")

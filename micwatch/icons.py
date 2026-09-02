@@ -385,6 +385,7 @@ def render_pixmap(
     level: float = 0.0,
     state: AnimState | None = None,
     size: float = 1.0,
+    muted: bool = False,
     px: int = 128,
 ) -> QPixmap:
     st = state or AnimState()
@@ -421,6 +422,7 @@ def render_pixmap(
         radius = 26 + 24 * st.ripple
         painter.drawEllipse(QPointF(50, 50 + st.dy), radius, radius)
 
+    painter.save()
     painter.translate(50, 50 + st.dy)
     if st.rotation:
         painter.rotate(st.rotation)
@@ -429,6 +431,17 @@ def render_pixmap(
     painter.translate(-50, -50)
 
     _DRAW.get(style, _DRAW["mic"])(painter, paint_color, level)
+    painter.restore()
+
+    if muted:
+        # carve a gap out of the glyph first, so the slash reads at 22 px
+        painter.setCompositionMode(QPainter.CompositionMode_Clear)
+        painter.setPen(QPen(QColor(0, 0, 0), 20, Qt.SolidLine, Qt.FlatCap))
+        painter.drawLine(QPointF(12, 12), QPointF(88, 88))
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+        painter.setPen(QPen(paint_color, 11, Qt.SolidLine, Qt.RoundCap))
+        painter.drawLine(QPointF(14, 14), QPointF(86, 86))
+
     painter.end()
     return pixmap
 

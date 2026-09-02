@@ -1,5 +1,5 @@
 Name:           micwatch-kde
-Version:        1.0.1
+Version:        1.1.0
 Release:        1%{?dist}
 Summary:        Microphone in-use tray indicator with a user-defined threshold
 
@@ -17,7 +17,8 @@ Requires:       pulseaudio-utils
 
 %description
 MicWatch is a tray indicator that lights up when an application is actually
-using the microphone. It separates "an app opened the input device" from
+using the microphone, and lets you mute one application's microphone without
+touching the others. It separates "an app opened the input device" from
 "sound is really going through it": you set a threshold in dBFS, and the icon
 only lights up above it. 18 icon styles, 15 animations and a colour per state.
 
@@ -51,6 +52,9 @@ install -Dm 0644 README.md %{buildroot}%{_datadir}/doc/%{name}/README.md
 %{_datadir}/icons/hicolor/*/apps/micwatch.*
 
 %changelog
+* Wed Sep 02 2026 Gabriel Marques Ferrarezi <110578985+gabrielmf1998@users.noreply.github.com> - 1.1.0-1
+- Per-application mute and capture volume, device mute, muted tray state
+
 * Tue Sep 01 2026 Gabriel Marques Ferrarezi <110578985+gabrielmf1998@users.noreply.github.com> - 1.0.1-1
 - Bigger icons: every style now fills the tray slot, plus an Icon size slider
 

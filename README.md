@@ -2,8 +2,9 @@
 
 A microphone in-use tray indicator for PipeWire, built for KDE Plasma.
 
-It does one thing: **light up when the microphone is actually being used** — and it lets
-you decide what "being used" means, with a threshold in dBFS that you set yourself.
+It lights up when the microphone is **actually being used** — you decide what that means,
+with a threshold in dBFS you set yourself — and it lets you **mute one application's
+microphone without touching the others**.
 
 ![Icon styles and states](docs/states.png)
 
@@ -17,6 +18,7 @@ device, even when nothing is going through it. MicWatch separates the two:
 | Idle | nothing is recording | grey `#6e7681` |
 | Open, quiet | an app holds the mic, but the signal is below your threshold | amber `#e3b341` |
 | In use | the signal is above your threshold | green `#3fb950` |
+| Muted | you muted the app (or the device); the icon gets a slash | red `#e5534b` |
 
 ## Install
 
@@ -29,9 +31,9 @@ curl -fsSL https://raw.githubusercontent.com/gabrielmf1998/MicWatch-KDE/main/ins
 Or grab a package from the [latest release](https://github.com/gabrielmf1998/MicWatch-KDE/releases/latest):
 
 ```sh
-sudo dnf install ./micwatch-kde-1.0.1-1.fc46.noarch.rpm       # Fedora
-sudo apt install ./micwatch-kde_1.0.1-1_all.deb               # Debian / Ubuntu
-sudo pacman -U ./micwatch-kde-1.0.1-1-any.pkg.tar.zst         # Arch
+sudo dnf install ./micwatch-kde-1.1.0-1.fc46.noarch.rpm       # Fedora
+sudo apt install ./micwatch-kde_1.1.0-1_all.deb               # Debian / Ubuntu
+sudo pacman -U ./micwatch-kde-1.1.0-1-any.pkg.tar.zst         # Arch
 chmod +x MicWatch-KDE-x86_64.AppImage && ./MicWatch-KDE-x86_64.AppImage
 ```
 
@@ -69,15 +71,47 @@ Start with the session, hide the icon while idle, or drop the separate "quiet" c
 
 ![Behaviour tab](docs/settings-behaviour.png)
 
+## Per-application mute
+
+Right-click the tray icon and you get one entry per program currently recording:
+
+```
+Microphone in use — vesktop  ·  Level: -31 dB
+────────────────────────────────────────────
+[x] Mute vesktop
+[ ] Mute Firefox
+    Unmute obs (remembered)
+────────────────────────────────────────────
+[ ] Mute the microphone device
+```
+
+Muting an app mutes **only that application's capture stream** (`source-output`), so a
+call keeps working while a game, a browser tab or a recorder hears silence. The device
+entry mutes the input for everyone at once, the way a hardware switch would.
+
+Muted apps are remembered by name: when the program opens the microphone again — after a
+restart, or in a new call — MicWatch re-mutes it automatically. Turn that off in
+**Behaviour → Remember muted apps**.
+
+The Detection tab lists the same applications with a **capture volume slider** (0–150%)
+next to each mute box, so you can ride one program's mic gain without touching the device.
+
+While everything recording is muted, the tray icon turns red with a slash and MicWatch
+stops metering — it will not open the microphone to measure something that is silent.
+
 ## Features
 
+- **Per-application mute** from the tray menu, remembered across restarts of the app.
+- **Per-application capture volume** (0–150%) from the Detection tab.
+- **Device mute** for every application at once.
 - **Icon size slider** — every style fills the tray slot at 100%, dial it down to taste.
 - **18 icon styles** — microphone (outline/solid/circle/badge), headset mic, studio mic,
   dot, dot with ring, LED tile, record, ring meter, double ring, gauge, level bars,
   wide bars, waveform, signal waves and heartbeat line. Picked from a visual grid.
 - **15 animations** — none, pulse, breathe, blink, fast strobe, glow halo, ripple rings,
   bounce, wobble, spin, heartbeat, follow-the-level, glow-with-the-level, rainbow, siren.
-- **Full colour control** — one colour per state, hex field, colour picker and 12 presets.
+- **Full colour control** — one colour per state (idle, quiet, in use, muted), hex field,
+  colour picker and 12 presets.
 - **User-defined threshold in dBFS** — live meter on a dB scale (−60 … 0 dB), a numeric
   readout, and a *Set just above noise* button.
 - **Pick which input to measure** — follow the recording app, or pin one device.
@@ -102,6 +136,8 @@ reads the list of recording streams.
   and from which source. Streams reading a sink monitor are loopback, not microphone use.
 - While an app records, MicWatch opens its own `pw-cat` capture — it shows up as
   `MicWatch Meter` — and measures RMS per 30 ms block, converted to dBFS.
+- Muting uses `pactl set-source-output-mute` on that application's stream, and
+  `pactl set-source-mute` for the device; volume uses `set-source-output-volume`.
 
 A quiet room measures around −50 dB and speech lands between −35 and −20 dB, which is why
 the default threshold is −42 dB.
@@ -126,7 +162,7 @@ To avoid two microphone icons, disable Plasma's own:
 
 ```
 micwatch/config.py      defaults, load/save
-micwatch/audio.py       stream detection (pactl) + level meter (pw-cat)
+micwatch/audio.py       stream detection, per-app mute/volume (pactl) + meter (pw-cat)
 micwatch/icons.py       every icon painted at runtime with QPainter
 micwatch/tray.py        state machine: idle / open-quiet / in-use
 micwatch/settings.py    settings window with the live dB meter

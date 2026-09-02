@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import autostart, icons
-from .audio import list_sources
+from .audio import list_sources, set_stream_volume
 from .config import APP_NAME, MIN_DB
 
 PRESETS = [
@@ -133,13 +133,16 @@ class IconPreview(QWidget):
     def paintEvent(self, event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        labels = ["Idle", "Open (quiet)", "In use"]
-        keys = ["color_idle", "color_standby", "color_active"]
-        size = 58
-        step = self.width() / 3
+        labels = ["Idle", "Open (quiet)", "In use", "Muted"]
+        keys = ["color_idle", "color_standby", "color_active", "color_muted"]
+        size = 54
+        step = self.width() / 4
         for i, (label, key) in enumerate(zip(labels, keys)):
             level = 0.30
-            if i == 2:
+            if i == 3:
+                state = icons.AnimState()
+                level = 0.20
+            elif i == 2:
                 state = icons.anim_state(
                     self.config["animation"], self._phase, max(0.05, self.level)
                 )
@@ -158,6 +161,7 @@ class IconPreview(QWidget):
                 level=level,
                 state=state,
                 size=float(self.config["icon_size"]),
+                muted=i == 3,
                 px=size * 2,
             )
             x = step * i + step / 2 - size / 2
@@ -167,6 +171,61 @@ class IconPreview(QWidget):
                 QRectF(step * i, size + 12, step, 20), Qt.AlignHCenter | Qt.AlignTop, label
             )
         p.end()
+
+
+class AppRow(QWidget):
+    """One recording application: mute it, or ride its capture volume."""
+
+    def __init__(self, app: str, tray, parent=None) -> None:
+        super().__init__(parent)
+        self.app = app
+        self.tray = tray
+        self._busy = False
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.name = QLabel(app)
+        self.name.setToolTip(app)
+        self.volume = QSlider(Qt.Horizontal)
+        self.volume.setRange(0, 150)
+        self.volume.setFixedWidth(130)
+        self.volume.valueChanged.connect(self._volume_changed)
+        self.percent = QLabel()
+        self.percent.setMinimumWidth(42)
+        self.mute = QCheckBox("Mute")
+        self.mute.toggled.connect(self._mute_toggled)
+        layout.addWidget(self.name, 1)
+        layout.addWidget(self.volume)
+        layout.addWidget(self.percent)
+        layout.addWidget(self.mute)
+
+    def update_from(self, streams) -> None:
+        if not streams:
+            return
+        self._busy = True
+        muted = all(s.muted for s in streams)
+        volume = max(s.volume for s in streams)
+        self.mute.setChecked(muted)
+        if not self.volume.isSliderDown():
+            self.volume.setValue(volume)
+        self.percent.setText(f"{volume}%")
+        sources = ", ".join(dict.fromkeys(s.source_desc for s in streams))
+        pid = streams[0].pid
+        self.name.setText(f"{self.app}" + (f"  ·  pid {pid}" if pid else ""))
+        self.name.setToolTip(sources)
+        self.volume.setEnabled(not muted)
+        self._busy = False
+
+    def _mute_toggled(self, checked: bool) -> None:
+        if not self._busy:
+            self.tray.set_app_mute(self.app, checked)
+
+    def _volume_changed(self, value: int) -> None:
+        self.percent.setText(f"{value}%")
+        if self._busy:
+            return
+        for stream in self.tray.monitor.streams_of(self.app):
+            set_stream_volume(stream.index, value)
 
 
 class ColorButton(QPushButton):
@@ -289,6 +348,7 @@ class SettingsWindow(QWidget):
             ("color_idle", "Idle"),
             ("color_standby", "Open, below threshold"),
             ("color_active", "In use"),
+            ("color_muted", "Muted"),
         ]
         for row, (key, label) in enumerate(rows):
             cgrid.addWidget(QLabel(label), row, 0)
@@ -418,16 +478,29 @@ class SettingsWindow(QWidget):
         ignore_row.addRow("Ignore apps", self.ignore)
         layout.addLayout(ignore_row)
 
-        self.who = QLabel()
+        self.streams_box = QGroupBox("Applications recording now")
+        self.streams_layout = QVBoxLayout(self.streams_box)
+        self.who = QLabel("Nothing is recording right now.")
         self.who.setWordWrap(True)
         self.who.setStyleSheet("color: #8b949e;")
-        layout.addWidget(self.who)
+        self.streams_layout.addWidget(self.who)
+        layout.addWidget(self.streams_box)
+
+        hint2 = QLabel(
+            "Muting here mutes only that application's capture stream — everything else "
+            "keeps hearing the microphone. Muted apps are remembered and re-muted when "
+            "they open the mic again (Behaviour tab)."
+        )
+        hint2.setWordWrap(True)
+        hint2.setStyleSheet("color: #8b949e;")
+        layout.addWidget(hint2)
         layout.addStretch(1)
 
+        self._rows: dict[str, AppRow] = {}
         self._who_timer = QTimer(self)
-        self._who_timer.timeout.connect(self._update_who)
+        self._who_timer.timeout.connect(self.refresh_streams)
         self._who_timer.start(700)
-        self._update_who()
+        self.refresh_streams()
         return page
 
     def _behaviour_tab(self) -> QWidget:
@@ -455,6 +528,11 @@ class SettingsWindow(QWidget):
         self.standby.setChecked(bool(self.config["show_standby"]))
         self.standby.toggled.connect(lambda v: self._set("show_standby", bool(v)))
         layout.addWidget(self.standby)
+
+        self.remember = QCheckBox("Remember muted apps and re-mute them automatically")
+        self.remember.setChecked(bool(self.config["remember_mutes"]))
+        self.remember.toggled.connect(lambda v: self._set("remember_mutes", bool(v)))
+        layout.addWidget(self.remember)
 
         self.tip_level = QCheckBox("Show the level in the tooltip")
         self.tip_level.setChecked(bool(self.config["tooltip_show_level"]))
@@ -559,16 +637,22 @@ class SettingsWindow(QWidget):
             self.autostart.setChecked(result)
         self.tray.sync_autostart_action()
 
-    def _update_who(self) -> None:
-        streams = self.tray.monitor.streams
-        if not streams:
-            self.who.setText("Nothing is recording right now.")
-            return
-        lines = [
-            f"• {s.app}" + (f" (pid {s.pid})" if s.pid else "") + f" → {s.source_desc}"
-            for s in streams
-        ]
-        self.who.setText("Recording now:\n" + "\n".join(lines))
+    def refresh_streams(self) -> None:
+        """Keep one row per recording application, live."""
+        apps = self.tray.monitor.recording_apps()
+        for app in list(self._rows):
+            if app not in apps:
+                row = self._rows.pop(app)
+                self.streams_layout.removeWidget(row)
+                row.deleteLater()
+        for app in apps:
+            row = self._rows.get(app)
+            if row is None:
+                row = AppRow(app, self.tray, self.streams_box)
+                self._rows[app] = row
+                self.streams_layout.addWidget(row)
+            row.update_from(self.tray.monitor.streams_of(app))
+        self.who.setVisible(not apps)
 
     def _on_level(self, value: float) -> None:
         self.bar.set_level(value)

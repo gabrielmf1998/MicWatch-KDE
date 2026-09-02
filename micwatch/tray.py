@@ -10,10 +10,10 @@ from PySide6.QtGui import QAction, QColor, QIcon
 from PySide6.QtWidgets import QMenu, QMessageBox, QSystemTrayIcon
 
 from . import autostart, icons
-from .audio import LevelMeter, MicMonitor
+from .audio import LevelMeter, MicMonitor, set_source_mute, set_stream_mute
 from .config import APP_NAME, MIN_DB
 
-IDLE, STANDBY, ACTIVE = "idle", "standby", "active"
+IDLE, STANDBY, ACTIVE, MUTED = "idle", "standby", "active", "muted"
 
 # styles whose drawing reacts to the level, so they need repainting as it moves
 REACTIVE_STYLES = {
@@ -61,10 +61,48 @@ class MicWatchTray(QObject):
 
     # -- menu ------------------------------------------------------------
     def _build_menu(self) -> None:
-        menu = QMenu()
-        self._status_action = QAction("Microphone idle", menu)
+        self.menu = QMenu()
+        self._status_action = QAction("Microphone idle", self.menu)
+        self._autostart_action = QAction("Start on login", self.menu)
+        self._rebuild_menu()
+        self.tray.setContextMenu(self.menu)
+
+    def _rebuild_menu(self) -> None:
+        """The app list changes as programs start and stop recording."""
+        menu = self.menu
+        menu.clear()
+
+        self._status_action = QAction(self._status_text(), menu)
         self._status_action.setEnabled(False)
         menu.addAction(self._status_action)
+        menu.addSeparator()
+
+        apps = self.monitor.recording_apps()
+        for app in apps:
+            streams = self.monitor.streams_of(app)
+            action = QAction(f"Mute {app}", menu)
+            action.setCheckable(True)
+            action.setChecked(bool(streams) and all(s.muted for s in streams))
+            action.setToolTip(f"Mute only {app}; other applications keep the microphone")
+            action.toggled.connect(lambda checked, a=app: self.set_app_mute(a, checked))
+            menu.addAction(action)
+
+        for app in self.config["muted_apps"]:
+            if app in apps:
+                continue
+            action = QAction(f"Unmute {app} (remembered)", menu)
+            action.triggered.connect(lambda _=False, a=app: self.set_app_mute(a, False))
+            menu.addAction(action)
+
+        if apps or self.config["muted_apps"]:
+            menu.addSeparator()
+
+        device = QAction("Mute the microphone device", menu)
+        device.setCheckable(True)
+        device.setChecked(self.monitor.source_muted(self.monitor.preferred_source()))
+        device.setToolTip("Mutes the input device itself, for every application")
+        device.toggled.connect(self.set_device_mute)
+        menu.addAction(device)
         menu.addSeparator()
 
         settings_action = QAction("Settings…", menu)
@@ -86,8 +124,33 @@ class MicWatchTray(QObject):
         quit_action.triggered.connect(self.quit)
         menu.addAction(quit_action)
 
-        self.menu = menu
-        self.tray.setContextMenu(menu)
+    # -- per-application mute --------------------------------------------
+    def set_app_mute(self, app: str, mute: bool) -> None:
+        """Mute one application's capture stream; everything else keeps recording."""
+        for stream in self.monitor.streams_of(app):
+            set_stream_mute(stream.index, mute)
+            stream.muted = mute
+        remembered = list(self.config["muted_apps"])
+        if mute and self.config["remember_mutes"]:
+            if app not in remembered:
+                remembered.append(app)
+        elif not mute and app in remembered:
+            remembered.remove(app)
+        if remembered != self.config["muted_apps"]:
+            self.config["muted_apps"] = remembered
+            self.config.save()
+        QTimer.singleShot(150, self._after_mute_change)
+
+    def set_device_mute(self, mute: bool) -> None:
+        set_source_mute(self.monitor.preferred_source(), mute)
+        QTimer.singleShot(150, self._after_mute_change)
+
+    def _after_mute_change(self) -> None:
+        self.monitor.refresh()
+        self._evaluate(force=True)
+        self._rebuild_menu()
+        if self._settings is not None:
+            self._settings.refresh_streams()
 
     def _toggle_autostart(self, enabled: bool) -> None:
         result = autostart.set_enabled(enabled)
@@ -123,6 +186,13 @@ class MicWatchTray(QObject):
 
     def _on_streams(self, streams) -> None:
         self._refresh_all()
+        self._rebuild_menu()
+
+    def _muted_now(self) -> bool:
+        streams = self.monitor.streams
+        if streams and all(s.muted for s in streams):
+            return True
+        return self.monitor.source_muted(self.monitor.preferred_source())
 
     def _on_meter_failed(self, reason: str) -> None:
         """The capture died (device unplugged, PipeWire restart): drop it and retry."""
@@ -149,7 +219,7 @@ class MicWatchTray(QObject):
     def _wanted_meter_target(self) -> str | None:
         if self._preview:
             return self.monitor.preferred_source()
-        if self.monitor.streams and self.config["threshold_enabled"]:
+        if self.monitor.streams and self.config["threshold_enabled"] and not self._muted_now():
             return self.monitor.preferred_source()
         return None
 
@@ -167,6 +237,8 @@ class MicWatchTray(QObject):
         streams = self.monitor.streams
         if not streams:
             state = IDLE
+        elif self._muted_now():
+            state = MUTED
         elif not self.config["threshold_enabled"]:
             state = ACTIVE
         else:
@@ -219,6 +291,8 @@ class MicWatchTray(QObject):
         active = QColor(self.config["color_active"])
         if self.state == IDLE:
             return idle
+        if self.state == MUTED:
+            return QColor(self.config["color_muted"])
         if self.state == STANDBY:
             return standby if self.config["show_standby"] else idle
         if self.config["shade_by_level"] and self.config["threshold_enabled"]:
@@ -237,6 +311,8 @@ class MicWatchTray(QObject):
 
         if self.state == ACTIVE:
             state = icons.anim_state(self.config["animation"], self._phase, self.level)
+        elif self.state == MUTED:
+            state = icons.AnimState()
         elif self.state == STANDBY:
             state = icons.AnimState(alpha=0.85)
         else:
@@ -251,24 +327,31 @@ class MicWatchTray(QObject):
                     level=self.level if metering else (0.28 if self.state == ACTIVE else 0.0),
                     state=state,
                     size=float(self.config["icon_size"]),
+                    muted=self.state == MUTED,
                 )
             )
         )
 
-    def _update_tooltip(self) -> None:
-        names: list[str] = []
-        for stream in self.monitor.streams:
-            if stream.app not in names:
-                names.append(stream.app)
-        joined = ", ".join(names)
+    def _status_text(self) -> str:
+        joined = ", ".join(self.monitor.recording_apps())
         if self.state == IDLE:
             text = "Microphone idle"
+        elif self.state == MUTED:
+            text = f"Muted — {joined}"
         elif self.state == STANDBY:
             text = f"Mic open, below threshold — {joined}"
         else:
             text = f"Microphone in use — {joined}"
-        if self.config["tooltip_show_level"] and (self.meter.running or self._preview):
+        if (
+            self.config["tooltip_show_level"]
+            and self.state != MUTED
+            and (self.meter.running or self._preview)
+        ):
             text += f"\nLevel: {to_db(self.level):.0f} dB (threshold {float(self.config['threshold_db']):.0f} dB)"
+        return text
+
+    def _update_tooltip(self) -> None:
+        text = self._status_text()
         self.tray.setToolTip(text)
         self._status_action.setText(text.replace("\n", "  ·  "))
 

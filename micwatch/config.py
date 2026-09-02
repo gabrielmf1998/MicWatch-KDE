@@ -21,6 +21,7 @@ DEFAULTS: dict = {
     "color_idle": "#6e7681",      # nothing is recording
     "color_standby": "#e3b341",   # mic open, but below the threshold
     "color_active": "#3fb950",    # mic open and above the threshold
+    "color_muted": "#e5534b",     # an app is recording but its mic is muted
     "animation": "glow",          # see icons.ANIMATIONS
     "animation_speed": 1.0,       # 0.25 .. 3.0
     "animation_fps": 20,
@@ -40,6 +41,8 @@ DEFAULTS: dict = {
     "ignore_corked": True,        # ignore paused streams
     "include_virtual": False,     # count virtual sources (screen-share, loopback)
     "ignore_apps": [],            # lower-case app names to never count
+    "muted_apps": [],             # apps kept muted, by application name
+    "remember_mutes": True,       # re-apply those mutes to new streams
     "poll_ms": 1500,              # safety-net poll on top of pactl events
 }
 
