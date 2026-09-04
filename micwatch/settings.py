@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QPixmap
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer, QUrl
+from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -28,23 +28,35 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import autostart, icons
+from . import autostart, icons, updates
 from .audio import list_sources, set_stream_volume
 from .config import APP_NAME, MIN_DB
 
 PRESETS = [
     ("#3fb950", "Green"),
     ("#00e676", "Neon green"),
-    ("#e5534b", "Red"),
-    ("#ff5c8a", "Hot pink"),
-    ("#e3b341", "Amber"),
-    ("#ff9800", "Orange"),
-    ("#58a6ff", "Blue"),
+    ("#7ee787", "Mint"),
     ("#2ee6d6", "Teal"),
+    ("#00e5ff", "Cyan"),
+    ("#58a6ff", "Blue"),
+    ("#4051ff", "Electric blue"),
     ("#bc8cff", "Purple"),
+    ("#d500f9", "Magenta"),
+    ("#ff5c8a", "Hot pink"),
+    ("#f778ba", "Pink"),
+    ("#e5534b", "Red"),
+    ("#ff1744", "Crimson"),
+    ("#ff9800", "Orange"),
+    ("#ff6d00", "Deep orange"),
+    ("#e3b341", "Amber"),
+    ("#ffe066", "Sun"),
+    ("#d4ff00", "Lime"),
+    ("#c9d1d9", "Bone"),
     ("#ffffff", "White"),
+    ("#8b949e", "Silver"),
     ("#6e7681", "Grey"),
     ("#3a3f46", "Dark grey"),
+    ("#161b22", "Ink"),
 ]
 
 
@@ -549,6 +561,40 @@ class SettingsWindow(QWidget):
         form.addRow("Stream re-check interval", self.poll)
         layout.addLayout(form)
 
+        box = QGroupBox("Updates")
+        box_layout = QVBoxLayout(box)
+
+        top = QHBoxLayout()
+        self.version_label = QLabel(f"Installed version: <b>{updates.current_version()}</b>")
+        self.check_button = QPushButton("Check for updates")
+        self.check_button.clicked.connect(self._check_updates)
+        top.addWidget(self.version_label, 1)
+        top.addWidget(self.check_button)
+        box_layout.addLayout(top)
+
+        self.update_status = QLabel("")
+        self.update_status.setWordWrap(True)
+        self.update_status.setStyleSheet("color: #8b949e;")
+        box_layout.addWidget(self.update_status)
+
+        actions = QHBoxLayout()
+        self.update_button = QPushButton("Update now")
+        self.update_button.clicked.connect(self.tray.run_update)
+        self.update_button.setVisible(False)
+        self.release_button = QPushButton("Open release page")
+        self.release_button.clicked.connect(self._open_release)
+        self.release_button.setVisible(False)
+        actions.addWidget(self.update_button)
+        actions.addWidget(self.release_button)
+        actions.addStretch(1)
+        box_layout.addLayout(actions)
+
+        self.auto_check = QCheckBox("Check automatically once a day")
+        self.auto_check.setChecked(bool(self.config["check_updates"]))
+        self.auto_check.toggled.connect(lambda v: self._set("check_updates", bool(v)))
+        box_layout.addWidget(self.auto_check)
+        layout.addWidget(box)
+
         note = QLabel(
             "KDE ships its own microphone indicator. To avoid two icons, turn it off in\n"
             "System Settings → Quick Settings → System Tray → Entries → Microphone."
@@ -556,6 +602,8 @@ class SettingsWindow(QWidget):
         note.setStyleSheet("color: #8b949e;")
         layout.addWidget(note)
         layout.addStretch(1)
+        if self.tray.release is not None:
+            self.show_update_result(self.tray.release, True)
         return page
 
     # -- helpers ---------------------------------------------------------
@@ -563,7 +611,7 @@ class SettingsWindow(QWidget):
         colour = QColor(self.config["color_active"])
         size = float(self.config["icon_size"])
         for key, button in self._style_buttons.items():
-            button.setIcon(icons.render_icon(key, colour, level=0.22, size=size, px=96))
+            button.setIcon(icons.render_icon(key, colour, level=0.14, size=size, px=96))
             button.setChecked(key == self.config["icon_style"])
         if hasattr(self, "icon_size_label"):  # the grid is built before the slider
             self.icon_size_label.setText(f"{size * 100:.0f}%")
@@ -653,6 +701,40 @@ class SettingsWindow(QWidget):
                 self.streams_layout.addWidget(row)
             row.update_from(self.tray.monitor.streams_of(app))
         self.who.setVisible(not apps)
+
+    def _check_updates(self) -> None:
+        self.check_button.setEnabled(False)
+        self.check_button.setText("Checking…")
+        self.update_status.setText("Asking GitHub for the latest release…")
+        self.tray.check_updates()
+
+    def show_update_result(self, release, newer: bool) -> None:
+        """Called by the tray when a check finishes, manual or automatic."""
+        self.check_button.setEnabled(True)
+        self.check_button.setText("Check for updates")
+        if release is None:
+            self.update_status.setText("Could not reach GitHub. Check your connection.")
+            self.update_button.setVisible(False)
+            self.release_button.setVisible(False)
+            return
+        self._release = release
+        self.release_button.setVisible(True)
+        if newer:
+            self.update_status.setText(
+                f"<b>{release.name}</b> is available — you are on "
+                f"{updates.current_version()}. “Update now” opens a terminal running the "
+                "installer for your distro."
+            )
+            self.update_button.setVisible(True)
+        else:
+            self.update_status.setText(
+                f"You are on the latest version ({updates.current_version()})."
+            )
+            self.update_button.setVisible(False)
+
+    def _open_release(self) -> None:
+        release = getattr(self, "_release", None)
+        QDesktopServices.openUrl(QUrl(release.url if release else updates.RELEASES_URL))
 
     def _on_level(self, value: float) -> None:
         self.bar.set_level(value)

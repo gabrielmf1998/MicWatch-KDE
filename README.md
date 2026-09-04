@@ -8,6 +8,8 @@ microphone without touching the others**.
 
 ![Icon styles and states](docs/states.png)
 
+![Animations](docs/animations.png)
+
 ## Why not the built-in one
 
 Plasma's microphone indicator lights up the moment any application *opens* the input
@@ -31,9 +33,9 @@ curl -fsSL https://raw.githubusercontent.com/gabrielmf1998/MicWatch-KDE/main/ins
 Or grab a package from the [latest release](https://github.com/gabrielmf1998/MicWatch-KDE/releases/latest):
 
 ```sh
-sudo dnf install ./micwatch-kde-1.1.0-1.fc46.noarch.rpm       # Fedora
-sudo apt install ./micwatch-kde_1.1.0-1_all.deb               # Debian / Ubuntu
-sudo pacman -U ./micwatch-kde-1.1.0-1-any.pkg.tar.zst         # Arch
+sudo dnf install ./micwatch-kde-1.2.0-1.fc46.noarch.rpm       # Fedora
+sudo apt install ./micwatch-kde_1.2.0-1_all.deb               # Debian / Ubuntu
+sudo pacman -U ./micwatch-kde-1.2.0-1-any.pkg.tar.zst         # Arch
 chmod +x MicWatch-KDE-x86_64.AppImage && ./MicWatch-KDE-x86_64.AppImage
 ```
 
@@ -105,13 +107,17 @@ stops metering — it will not open the microphone to measure something that is 
 - **Per-application capture volume** (0–150%) from the Detection tab.
 - **Device mute** for every application at once.
 - **Icon size slider** — every style fills the tray slot at 100%, dial it down to taste.
-- **18 icon styles** — microphone (outline/solid/circle/badge), headset mic, studio mic,
-  dot, dot with ring, LED tile, record, ring meter, double ring, gauge, level bars,
-  wide bars, waveform, signal waves and heartbeat line. Picked from a visual grid.
-- **15 animations** — none, pulse, breathe, blink, fast strobe, glow halo, ripple rings,
-  bounce, wobble, spin, heartbeat, follow-the-level, glow-with-the-level, rainbow, siren.
+- **26 icon styles** — microphone (outline/solid/circle/badge/hexagon), headset mic,
+  studio mic, dot, dot with ring, LED tile, diamond, record, ring meter, double ring,
+  gauge, pie, pill meter, level bars, wide bars, radial bars, waveform, signal waves,
+  heartbeat line, radio tower, speech bubble and a watching eye. Picked from a visual grid.
+- **25 animations** — pulse, breathe, blink, fast strobe, glow halo, ripple rings, bounce,
+  wobble, spin, heartbeat, follow-the-level, glow-with-the-level, rainbow, siren,
+  **crazy rainbow**, **glitch**, **hard glitch**, **neon flicker**, **jelly**, **shake**,
+  **swing**, **zoom**, **orbit** and **VHS tracking** — or none at all.
 - **Full colour control** — one colour per state (idle, quiet, in use, muted), hex field,
-  colour picker and 12 presets.
+  colour picker and 24 presets.
+- **Built-in update check** — one button, or a quiet daily check, and a one-click upgrade.
 - **User-defined threshold in dBFS** — live meter on a dB scale (−60 … 0 dB), a numeric
   readout, and a *Set just above noise* button.
 - **Pick which input to measure** — follow the recording app, or pin one device.
@@ -122,6 +128,22 @@ stops metering — it will not open the microphone to measure something that is 
 - Optional: hide the icon completely while nothing is recording.
 - Tooltip and menu show **which** applications are recording and from which device.
 - **Start on login** from the tray menu or the Behaviour tab.
+
+## Staying up to date
+
+MicWatch can tell you when there is a new release:
+
+- **Settings → Behaviour → Updates → Check for updates**, or **Check for updates…** in the
+  tray menu.
+- With *Check automatically once a day* on (the default) it asks GitHub quietly in the
+  background and, when something newer exists, the tray menu grows an
+  **Update to vX.Y.Z…** entry and a notification appears.
+- **Update now** opens a terminal running the installer for your distro, so you can type
+  your password and watch it happen. Running from the AppImage, it downloads the new
+  AppImage and replaces the one you are running instead.
+
+The check is a single anonymous request to the GitHub releases API; turn it off with the
+checkbox if you would rather not.
 
 ## Privacy
 

@@ -5,11 +5,11 @@ from __future__ import annotations
 import math
 import time
 
-from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QIcon
+from PySide6.QtCore import QObject, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon
 from PySide6.QtWidgets import QMenu, QMessageBox, QSystemTrayIcon
 
-from . import autostart, icons
+from . import autostart, icons, updates
 from .audio import LevelMeter, MicMonitor, set_source_mute, set_stream_mute
 from .config import APP_NAME, MIN_DB
 
@@ -40,6 +40,8 @@ class MicWatchTray(QObject):
         self._last_above = 0.0
         self._preview = False
         self._settings = None
+        self._manual_check = False
+        self.release = None          # set once a newer release is found
 
         self.monitor = MicMonitor(config, self)
         self.monitor.changed.connect(self._on_streams)
@@ -54,6 +56,10 @@ class MicWatchTray(QObject):
 
         self._anim = QTimer(self)
         self._anim.timeout.connect(self._tick)
+
+        self.updates = updates.UpdateChecker(self)
+        self.updates.checked.connect(self._on_update_checked)
+        QTimer.singleShot(20000, self._check_updates_if_due)
 
         self.monitor.start()
         self._refresh_all()
@@ -75,6 +81,11 @@ class MicWatchTray(QObject):
         self._status_action = QAction(self._status_text(), menu)
         self._status_action.setEnabled(False)
         menu.addAction(self._status_action)
+
+        if self.release is not None:
+            update_action = QAction(f"Update to {self.release.tag} …", menu)
+            update_action.triggered.connect(self.open_update_dialog)
+            menu.addAction(update_action)
         menu.addSeparator()
 
         apps = self.monitor.recording_apps()
@@ -114,6 +125,10 @@ class MicWatchTray(QObject):
         self._autostart_action.setChecked(autostart.is_enabled())
         self._autostart_action.toggled.connect(self._toggle_autostart)
         menu.addAction(self._autostart_action)
+
+        check_action = QAction("Check for updates…", menu)
+        check_action.triggered.connect(lambda: self.check_updates(manual=True))
+        menu.addAction(check_action)
 
         about_action = QAction(f"About {APP_NAME}", menu)
         about_action.triggered.connect(self._about)
@@ -174,9 +189,90 @@ class MicWatchTray(QObject):
         QMessageBox.information(
             None,
             f"About {APP_NAME}",
-            f"<b>{APP_NAME}</b><br>A microphone-in-use tray indicator for PipeWire.<br><br>"
+            f"<b>{APP_NAME} {updates.current_version()}</b><br>"
+            "A microphone-in-use tray indicator for PipeWire.<br><br>"
             "It lights up when an application is capturing from a real input device "
-            "and the signal is above your threshold.",
+            "and the signal is above your threshold, and it can mute one application "
+            "without touching the others.<br><br>"
+            f'<a href="{updates.RELEASES_URL}">{updates.REPO}</a>',
+        )
+
+    # -- updates ---------------------------------------------------------
+    def _check_updates_if_due(self) -> None:
+        if not self.config["check_updates"]:
+            return
+        if time.time() - float(self.config["last_update_check"]) < 86400:
+            return
+        self.check_updates()
+
+    def check_updates(self, manual: bool = False) -> None:
+        self._manual_check = manual
+        self.updates.check()
+
+    def _on_update_checked(self, release, newer: bool) -> None:
+        manual = getattr(self, "_manual_check", False)
+        self._manual_check = False
+        if release is not None:
+            self.config["last_update_check"] = time.time()
+            self.config.save()
+        self.release = release if newer else None
+        self._rebuild_menu()
+        if self._settings is not None:
+            self._settings.show_update_result(release, newer)
+        if not manual:
+            if newer:
+                self.tray.showMessage(
+                    APP_NAME,
+                    f"MicWatch {release.version} is available — right-click the tray icon.",
+                    self.tray.icon(),
+                    8000,
+                )
+            return
+        if release is None:
+            QMessageBox.warning(
+                None, f"{APP_NAME} — updates", "Could not reach GitHub to check for updates."
+            )
+        elif newer:
+            self.open_update_dialog()
+        else:
+            QMessageBox.information(
+                None,
+                f"{APP_NAME} — updates",
+                f"You are on the latest version ({updates.current_version()}).",
+            )
+
+    def open_update_dialog(self) -> None:
+        release = self.release
+        if release is None:
+            return
+        box = QMessageBox()
+        box.setWindowTitle(f"{APP_NAME} — update available")
+        box.setIcon(QMessageBox.Information)
+        box.setText(
+            f"<b>MicWatch {release.version}</b> is available."
+            f"<br>You are running {updates.current_version()}."
+        )
+        body = release.body.strip()
+        if body:
+            box.setDetailedText(body[:2000])
+        update_button = box.addButton("Update now", QMessageBox.AcceptRole)
+        page_button = box.addButton("Open release page", QMessageBox.ActionRole)
+        box.addButton("Later", QMessageBox.RejectRole)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is update_button:
+            self.run_update()
+        elif clicked is page_button:
+            QDesktopServices.openUrl(QUrl(release.url))
+
+    def run_update(self) -> None:
+        if updates.launch_update(self.release):
+            return
+        QMessageBox.information(
+            None,
+            f"{APP_NAME} — update",
+            "No terminal emulator was found. Run this in a shell:<br><br>"
+            f"<code>{updates.INSTALL_COMMAND}</code>",
         )
 
     # -- signals ---------------------------------------------------------

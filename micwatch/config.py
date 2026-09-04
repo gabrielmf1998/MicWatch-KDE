@@ -44,6 +44,10 @@ DEFAULTS: dict = {
     "muted_apps": [],             # apps kept muted, by application name
     "remember_mutes": True,       # re-apply those mutes to new streams
     "poll_ms": 1500,              # safety-net poll on top of pactl events
+
+    # --- updates ---
+    "check_updates": True,        # ask GitHub for a newer release once a day
+    "last_update_check": 0.0,
 }
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import (
     QColor,
     QIcon,
@@ -35,6 +35,14 @@ ICON_STYLES = [
     ("waveform", "Waveform"),
     ("radar", "Signal waves"),
     ("pulse_line", "Heartbeat line"),
+    ("mic_hex", "Microphone hexagon"),
+    ("diamond", "Diamond"),
+    ("pill", "Pill meter"),
+    ("eye", "Watching eye"),
+    ("tower", "Radio tower"),
+    ("bubble", "Speech bubble"),
+    ("radial_bars", "Radial bars"),
+    ("pie", "Pie meter"),
 ]
 
 ANIMATIONS = [
@@ -53,6 +61,16 @@ ANIMATIONS = [
     ("level_glow", "Glow with the level"),
     ("rainbow", "Rainbow"),
     ("siren", "Siren (hue sweep)"),
+    ("crazy_rainbow", "Crazy rainbow"),
+    ("glitch", "Glitch"),
+    ("hard_glitch", "Hard glitch"),
+    ("neon", "Neon flicker"),
+    ("jelly", "Jelly (squash)"),
+    ("shake", "Shake"),
+    ("swing", "Swing"),
+    ("zoom", "Zoom in/out"),
+    ("orbit", "Orbit"),
+    ("vhs", "VHS tracking"),
 ]
 
 _BAR_FACTORS = (0.45, 0.72, 1.0, 0.68, 0.4)
@@ -65,12 +83,23 @@ _WIDE_FACTORS = (0.3, 0.55, 0.8, 1.0, 0.78, 0.52, 0.28)
 @dataclass
 class AnimState:
     scale: float = 1.0
+    scale_x: float = 1.0     # non-uniform, for squash and stretch
+    scale_y: float = 1.0
     alpha: float = 1.0
     glow: float = 0.0
     rotation: float = 0.0
+    dx: float = 0.0
     dy: float = 0.0
     ripple: float = -1.0     # 0..1 while a ring expands, <0 when unused
     hue_shift: float = 0.0
+    glitch: float = 0.0      # 0..1 amount of RGB split and slice tearing
+    phase: float = 0.0
+
+
+def _noise(seed: float) -> float:
+    """Deterministic 0..1 pseudo-random, so a phase always glitches the same way."""
+    value = math.sin(seed * 127.1) * 43758.5453
+    return value - math.floor(value)
 
 
 def anim_state(animation: str, phase: float, level: float = 0.0) -> AnimState:
@@ -118,6 +147,48 @@ def anim_state(animation: str, phase: float, level: float = 0.0) -> AnimState:
     elif animation == "siren":
         st.hue_shift = 45.0 * math.sin(t * 2 * math.pi)
         st.glow = 0.25 + 0.45 * wave
+    elif animation == "crazy_rainbow":
+        st.hue_shift = (t * 3.0 % 1.0) * 360.0
+        st.scale = 0.90 + 0.18 * (0.5 + 0.5 * math.sin(t * 6 * math.pi))
+        st.rotation = 14.0 * math.sin(t * 4 * math.pi)
+        st.glow = 0.35 + 0.5 * wave
+    elif animation == "glitch":
+        st.glitch = 0.45 + 0.55 * _noise(t * 7.0)
+        st.dx = (_noise(t * 13.0) - 0.5) * 5.0
+        st.hue_shift = 22.0 * (_noise(t * 3.0) - 0.5)
+    elif animation == "hard_glitch":
+        st.glitch = 1.0
+        st.dx = (_noise(t * 23.0) - 0.5) * 12.0
+        st.dy = (_noise(t * 29.0) - 0.5) * 6.0
+        st.hue_shift = 90.0 * (_noise(t * 5.0) - 0.5)
+        st.alpha = 0.65 + 0.35 * _noise(t * 17.0)
+        st.scale = 0.94 + 0.12 * _noise(t * 11.0)
+    elif animation == "neon":
+        flicker = _noise(t * 19.0)
+        st.alpha = 0.35 if flicker > 0.86 else 1.0
+        st.glow = 0.25 + 0.75 * (0.0 if flicker > 0.86 else 0.6 + 0.4 * wave)
+    elif animation == "jelly":
+        squash = 0.16 * math.sin(t * 4 * math.pi)
+        st.scale_x = 1.0 + squash
+        st.scale_y = 1.0 - squash
+        st.dy = -4.0 * abs(math.sin(t * 2 * math.pi))
+    elif animation == "shake":
+        st.dx = (_noise(t * 41.0) - 0.5) * 9.0
+        st.dy = (_noise(t * 37.0) - 0.5) * 9.0
+    elif animation == "swing":
+        st.rotation = 18.0 * math.sin(t * 2 * math.pi) ** 3
+        st.dy = -2.0 * abs(math.sin(t * 2 * math.pi))
+    elif animation == "zoom":
+        st.scale = 0.72 + 0.42 * wave
+    elif animation == "orbit":
+        st.dx = 7.0 * math.cos(t * 2 * math.pi)
+        st.dy = 7.0 * math.sin(t * 2 * math.pi)
+    elif animation == "vhs":
+        st.glitch = 0.30
+        st.dy = (_noise(t * 3.0) - 0.5) * 10.0
+        st.alpha = 0.8 + 0.2 * wave
+        st.hue_shift = 12.0 * math.sin(t * 8 * math.pi)
+    st.phase = t
     return st
 
 
@@ -353,6 +424,125 @@ def _pulse_line(p: QPainter, c: QColor, level: float) -> None:
     p.drawPath(path)
 
 
+def _polygon(cx: float, cy: float, radius: float, sides: int, rotation: float = 0.0):
+    from PySide6.QtGui import QPolygonF
+
+    points = []
+    for i in range(sides):
+        angle = rotation + i * 2 * math.pi / sides
+        points.append(QPointF(cx + radius * math.cos(angle), cy + radius * math.sin(angle)))
+    return QPolygonF(points)
+
+
+def _mic_hex(p: QPainter, c: QColor, level: float) -> None:
+    p.setPen(Qt.NoPen)
+    p.setBrush(c)
+    p.drawPolygon(_polygon(50, 50, 50, 6, -math.pi / 2))
+    p.save()
+    p.translate(50, 50)
+    p.scale(0.60, 0.60)
+    p.translate(-50, -50)
+    _mic(p, _contrast(c), False, 9.0)
+    p.restore()
+
+
+def _diamond(p: QPainter, c: QColor, level: float) -> None:
+    p.setPen(Qt.NoPen)
+    p.setBrush(c)
+    radius = 38 + 12 * min(1.0, level * 6.0)
+    p.drawPolygon(_polygon(50, 50, radius, 4, -math.pi / 2))
+
+
+def _pill(p: QPainter, c: QColor, level: float) -> None:
+    track = QColor(c)
+    track.setAlphaF(c.alphaF() * 0.28)
+    box = QRectF(4, 34, 92, 32)
+    p.setPen(Qt.NoPen)
+    p.setBrush(track)
+    p.drawRoundedRect(box, 16, 16)
+    filled = QRectF(box)
+    filled.setWidth(max(20.0, box.width() * min(1.0, level * 5.0)))
+    p.setBrush(c)
+    p.drawRoundedRect(filled, 16, 16)
+
+
+def _eye(p: QPainter, c: QColor, level: float) -> None:
+    path = QPainterPath(QPointF(4, 50))
+    path.quadTo(QPointF(50, 4), QPointF(96, 50))
+    path.quadTo(QPointF(50, 96), QPointF(4, 50))
+    p.setBrush(Qt.NoBrush)
+    p.setPen(QPen(c, 9, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.drawPath(path)
+    p.setPen(Qt.NoPen)
+    p.setBrush(c)
+    p.drawEllipse(QPointF(50, 50), 14 + 8 * min(1.0, level * 6.0), 14 + 8 * min(1.0, level * 6.0))
+
+
+def _tower(p: QPainter, c: QColor, level: float) -> None:
+    loud = min(1.0, level * 5.0)
+    p.setBrush(Qt.NoBrush)
+    for i, radius in enumerate((17, 30)):
+        arc = QColor(c)
+        arc.setAlphaF(c.alphaF() * (1.0 if loud * 2.0 >= i + 1 else max(0.2, loud * 2.0 - i)))
+        p.setPen(QPen(arc, 8, Qt.SolidLine, Qt.RoundCap))
+        box = QRectF(50 - radius, 30 - radius, radius * 2, radius * 2)
+        p.drawArc(box, 25 * 16, 60 * 16)
+        p.drawArc(box, 95 * 16, 60 * 16)
+    p.setPen(QPen(c, 9, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.drawLine(QPointF(50, 22), QPointF(50, 36))          # mast
+    p.drawLine(QPointF(32, 94), QPointF(46, 40))          # legs
+    p.drawLine(QPointF(68, 94), QPointF(54, 40))
+    p.setPen(QPen(c, 7, Qt.SolidLine, Qt.RoundCap))
+    p.drawLine(QPointF(41, 62), QPointF(59, 62))          # cross braces
+    p.drawLine(QPointF(36, 80), QPointF(64, 80))
+
+
+def _bubble(p: QPainter, c: QColor, level: float) -> None:
+    p.setPen(Qt.NoPen)
+    p.setBrush(c)
+    p.drawRoundedRect(QRectF(4, 12, 92, 62), 22, 22)
+    tail = QPainterPath(QPointF(30, 70))
+    tail.lineTo(QPointF(30, 96))
+    tail.lineTo(QPointF(56, 70))
+    tail.closeSubpath()
+    p.drawPath(tail)
+    dot = _contrast(c)
+    p.setBrush(dot)
+    loud = min(1.0, level * 5.0)
+    for i, x in enumerate((30, 50, 70)):
+        radius = 5 + 4 * loud * (0.6 + 0.4 * ((i + 1) % 3) / 2)
+        p.drawEllipse(QPointF(x, 43), radius, radius)
+
+
+def _radial_bars(p: QPainter, c: QColor, level: float) -> None:
+    p.setPen(Qt.NoPen)
+    p.setBrush(c)
+    loud = min(1.0, level * 5.0)
+    count = 12
+    for i in range(count):
+        angle = i * 2 * math.pi / count
+        factor = 0.45 + 0.55 * abs(math.sin(i * 1.7))
+        length = 14 + 26 * loud * factor + 6 * factor
+        inner, outer = 16.0, 16.0 + length
+        p.save()
+        p.translate(50, 50)
+        p.rotate(math.degrees(angle))
+        p.drawRoundedRect(QRectF(inner, -4.5, outer - inner, 9), 4.5, 4.5)
+        p.restore()
+
+
+def _pie(p: QPainter, c: QColor, level: float) -> None:
+    box = QRectF(6, 6, 88, 88)
+    faint = QColor(c)
+    faint.setAlphaF(c.alphaF() * 0.25)
+    p.setPen(Qt.NoPen)
+    p.setBrush(faint)
+    p.drawEllipse(box)
+    p.setBrush(c)
+    span = int(360 * 16 * max(0.04, min(1.0, level * 5.0)))
+    p.drawPie(box, 90 * 16, -span)
+
+
 _DRAW = {
     "mic": lambda p, c, lv: _mic(p, c, False),
     "mic_filled": lambda p, c, lv: _mic(p, c, True),
@@ -372,12 +562,62 @@ _DRAW = {
     "waveform": _waveform,
     "radar": _radar,
     "pulse_line": _pulse_line,
+    "mic_hex": _mic_hex,
+    "diamond": _diamond,
+    "pill": _pill,
+    "eye": _eye,
+    "tower": _tower,
+    "bubble": _bubble,
+    "radial_bars": _radial_bars,
+    "pie": _pie,
 }
 
 
 # --------------------------------------------------------------------------
 # rendering
 # --------------------------------------------------------------------------
+def _draw_glyph(
+    painter: QPainter,
+    style: str,
+    colour: QColor,
+    level: float,
+    st: AnimState,
+    zoom: float,
+    dx: float,
+    dy: float,
+) -> None:
+    painter.save()
+    painter.translate(50 + dx, 50 + dy)
+    if st.rotation:
+        painter.rotate(st.rotation)
+    painter.scale(zoom * st.scale_x, zoom * st.scale_y)
+    painter.translate(-50, -50)
+    _DRAW.get(style, _DRAW["mic"])(painter, colour, level)
+    painter.restore()
+
+
+def _tear(pixmap: QPixmap, st: AnimState, px: int) -> QPixmap:
+    """Slice the finished icon into bands and shove them sideways."""
+    torn = QPixmap(px, px)
+    torn.fill(Qt.transparent)
+    painter = QPainter(torn)
+    painter.drawPixmap(0, 0, pixmap)
+    for i in range(2 + int(st.glitch * 2)):
+        pick = _noise(st.phase * 31.0 + i * 7.13)
+        size = _noise(st.phase * 17.0 + i * 3.77)
+        height = max(2, int(px * (0.05 + 0.11 * size)))
+        top = int(pick * max(1, px - height))
+        shift = int((size - 0.5) * px * 0.26 * st.glitch)
+        painter.setCompositionMode(QPainter.CompositionMode_Clear)
+        painter.fillRect(QRect(0, top, px, height), Qt.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+        painter.drawPixmap(
+            QRect(shift, top, px, height), pixmap, QRect(0, top, px, height)
+        )
+    painter.end()
+    return torn
+
+
 def render_pixmap(
     style: str,
     color: QColor,
@@ -398,9 +638,10 @@ def render_pixmap(
 
     paint_color = shift_hue(QColor(color), st.hue_shift)
     paint_color.setAlphaF(max(0.0, min(1.0, st.alpha)))
+    centre = QPointF(50 + st.dx, 50 + st.dy)
 
     if st.glow > 0.01:
-        gradient = QRadialGradient(QPointF(50, 50 + st.dy), 52)
+        gradient = QRadialGradient(centre, 52)
         inner = QColor(paint_color)
         inner.setAlphaF(0.55 * st.glow)
         mid = QColor(paint_color)
@@ -412,26 +653,28 @@ def render_pixmap(
         gradient.setColorAt(1.0, edge)
         painter.setPen(Qt.NoPen)
         painter.setBrush(gradient)
-        painter.drawEllipse(QPointF(50, 50 + st.dy), 50, 50)
+        painter.drawEllipse(centre, 50, 50)
 
     if st.ripple >= 0.0:
         ring = QColor(paint_color)
         ring.setAlphaF(max(0.0, 0.75 * (1.0 - st.ripple)))
         painter.setBrush(Qt.NoBrush)
         painter.setPen(QPen(ring, 6))
-        radius = 26 + 24 * st.ripple
-        painter.drawEllipse(QPointF(50, 50 + st.dy), radius, radius)
+        painter.drawEllipse(centre, 26 + 24 * st.ripple, 26 + 24 * st.ripple)
 
-    painter.save()
-    painter.translate(50, 50 + st.dy)
-    if st.rotation:
-        painter.rotate(st.rotation)
     zoom = st.scale * max(0.4, min(1.0, size))
-    painter.scale(zoom, zoom)
-    painter.translate(-50, -50)
 
-    _DRAW.get(style, _DRAW["mic"])(painter, paint_color, level)
-    painter.restore()
+    if st.glitch > 0.01:
+        # chromatic aberration: two tinted ghosts either side of the glyph
+        for offset, tint in (
+            (-5.0 * st.glitch, QColor(255, 45, 120)),
+            (5.0 * st.glitch, QColor(45, 230, 255)),
+        ):
+            ghost = QColor(tint)
+            ghost.setAlphaF(0.55 * max(0.35, st.alpha))
+            _draw_glyph(painter, style, ghost, level, st, zoom, st.dx + offset, st.dy)
+
+    _draw_glyph(painter, style, paint_color, level, st, zoom, st.dx, st.dy)
 
     if muted:
         # carve a gap out of the glyph first, so the slash reads at 22 px
@@ -443,6 +686,9 @@ def render_pixmap(
         painter.drawLine(QPointF(14, 14), QPointF(86, 86))
 
     painter.end()
+
+    if st.glitch > 0.01:
+        pixmap = _tear(pixmap, st, px)
     return pixmap
 
 

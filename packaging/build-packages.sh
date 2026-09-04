@@ -5,7 +5,7 @@ set -euo pipefail
 
 NAME=micwatch-kde
 BIN=micwatch
-VERSION=1.1.0
+VERSION=1.2.0
 RELEASE=1
 MAINT="Gabriel Marques Ferrarezi <110578985+gabrielmf1998@users.noreply.github.com>"
 URL="https://github.com/gabrielmf1998/MicWatch-KDE"
@@ -67,7 +67,7 @@ Maintainer: $MAINT
 Section: sound
 Priority: optional
 Homepage: $URL
-Depends: python3, python3-pyside6.qtwidgets, python3-pyside6.qtsvg, pipewire-bin, pulseaudio-utils
+Depends: python3, python3-pyside6.qtwidgets, python3-pyside6.qtsvg, pipewire-bin, pulseaudio-utils, curl
 Description: $SUMMARY
  MicWatch lights up in the system tray when an application is actually using
  the microphone. You set a threshold in dBFS, so the icon separates "an app
@@ -101,6 +101,7 @@ depend = python
 depend = pyside6
 depend = pipewire
 depend = libpulse
+depend = curl
 PKGINFO
 ( cd "$PKG"
   TAROPTS=(--no-xattrs --no-fflags --uid 0 --gid 0 --uname root --gname root)
