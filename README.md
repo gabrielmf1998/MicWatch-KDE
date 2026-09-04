@@ -33,9 +33,9 @@ curl -fsSL https://raw.githubusercontent.com/gabrielmf1998/MicWatch-KDE/main/ins
 Or grab a package from the [latest release](https://github.com/gabrielmf1998/MicWatch-KDE/releases/latest):
 
 ```sh
-sudo dnf install ./micwatch-kde-1.2.0-1.fc46.noarch.rpm       # Fedora
-sudo apt install ./micwatch-kde_1.2.0-1_all.deb               # Debian / Ubuntu
-sudo pacman -U ./micwatch-kde-1.2.0-1-any.pkg.tar.zst         # Arch
+sudo dnf install ./micwatch-kde-1.2.1-1.fc46.noarch.rpm       # Fedora
+sudo apt install ./micwatch-kde_1.2.1-1_all.deb               # Debian / Ubuntu
+sudo pacman -U ./micwatch-kde-1.2.1-1-any.pkg.tar.zst         # Arch
 chmod +x MicWatch-KDE-x86_64.AppImage && ./MicWatch-KDE-x86_64.AppImage
 ```
 
@@ -117,7 +117,8 @@ stops metering — it will not open the microphone to measure something that is 
   **swing**, **zoom**, **orbit** and **VHS tracking** — or none at all.
 - **Full colour control** — one colour per state (idle, quiet, in use, muted), hex field,
   colour picker and 24 presets.
-- **Built-in update check** — one button, or a quiet daily check, and a one-click upgrade.
+- **Update check on demand** — one button, one click to upgrade, and nothing runs in the
+  background unless you ask.
 - **User-defined threshold in dBFS** — live meter on a dB scale (−60 … 0 dB), a numeric
   readout, and a *Set just above noise* button.
 - **Pick which input to measure** — follow the recording app, or pin one device.
@@ -131,19 +132,16 @@ stops metering — it will not open the microphone to measure something that is 
 
 ## Staying up to date
 
-MicWatch can tell you when there is a new release:
+MicWatch **never phones home on its own** — there is no background check, no timer and no
+telemetry. It looks for a new release only when you press the button:
 
 - **Settings → Behaviour → Updates → Check for updates**, or **Check for updates…** in the
   tray menu.
-- With *Check automatically once a day* on (the default) it asks GitHub quietly in the
-  background and, when something newer exists, the tray menu grows an
-  **Update to vX.Y.Z…** entry and a notification appears.
+- If something newer exists, you get the release notes and the tray menu keeps an
+  **Update to vX.Y.Z…** entry for the rest of the session.
 - **Update now** opens a terminal running the installer for your distro, so you can type
   your password and watch it happen. Running from the AppImage, it downloads the new
   AppImage and replaces the one you are running instead.
-
-The check is a single anonymous request to the GitHub releases API; turn it off with the
-checkbox if you would rather not.
 
 ## Privacy
 

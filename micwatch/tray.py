@@ -40,8 +40,8 @@ class MicWatchTray(QObject):
         self._last_above = 0.0
         self._preview = False
         self._settings = None
-        self._manual_check = False
-        self.release = None          # set once a newer release is found
+        self._announce = True
+        self.release = None          # set once a check finds a newer release
 
         self.monitor = MicMonitor(config, self)
         self.monitor.changed.connect(self._on_streams)
@@ -59,7 +59,6 @@ class MicWatchTray(QObject):
 
         self.updates = updates.UpdateChecker(self)
         self.updates.checked.connect(self._on_update_checked)
-        QTimer.singleShot(20000, self._check_updates_if_due)
 
         self.monitor.start()
         self._refresh_all()
@@ -127,7 +126,7 @@ class MicWatchTray(QObject):
         menu.addAction(self._autostart_action)
 
         check_action = QAction("Check for updates…", menu)
-        check_action.triggered.connect(lambda: self.check_updates(manual=True))
+        check_action.triggered.connect(lambda: self.check_updates())
         menu.addAction(check_action)
 
         about_action = QAction(f"About {APP_NAME}", menu)
@@ -198,35 +197,19 @@ class MicWatchTray(QObject):
         )
 
     # -- updates ---------------------------------------------------------
-    def _check_updates_if_due(self) -> None:
-        if not self.config["check_updates"]:
-            return
-        if time.time() - float(self.config["last_update_check"]) < 86400:
-            return
-        self.check_updates()
-
-    def check_updates(self, manual: bool = False) -> None:
-        self._manual_check = manual
+    # Nothing here ever runs on its own: a check happens only when the user
+    # clicks "Check for updates", in the tray menu or in the settings window.
+    def check_updates(self, announce: bool = True) -> None:
+        self._announce = announce
         self.updates.check()
 
     def _on_update_checked(self, release, newer: bool) -> None:
-        manual = getattr(self, "_manual_check", False)
-        self._manual_check = False
-        if release is not None:
-            self.config["last_update_check"] = time.time()
-            self.config.save()
+        announce, self._announce = self._announce, True
         self.release = release if newer else None
         self._rebuild_menu()
         if self._settings is not None:
             self._settings.show_update_result(release, newer)
-        if not manual:
-            if newer:
-                self.tray.showMessage(
-                    APP_NAME,
-                    f"MicWatch {release.version} is available — right-click the tray icon.",
-                    self.tray.icon(),
-                    8000,
-                )
+        if not announce:
             return
         if release is None:
             QMessageBox.warning(

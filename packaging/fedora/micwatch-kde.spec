@@ -1,5 +1,5 @@
 Name:           micwatch-kde
-Version:        1.2.0
+Version:        1.2.1
 Release:        1%{?dist}
 Summary:        Microphone in-use tray indicator with a user-defined threshold
 
@@ -22,7 +22,7 @@ using the microphone, and lets you mute one application's microphone without
 touching the others. It separates "an app opened the input device" from
 "sound is really going through it": you set a threshold in dBFS, and the icon
 only lights up above it. 26 icon styles, 25 animations and a colour per state, and it can check GitHub for
-updates and upgrade itself in one click.
+updates and upgrade itself in one click, when you press the button.
 
 It never opens the microphone on its own: the level meter runs only while some
 other application is already recording.
@@ -54,6 +54,9 @@ install -Dm 0644 README.md %{buildroot}%{_datadir}/doc/%{name}/README.md
 %{_datadir}/icons/hicolor/*/apps/micwatch.*
 
 %changelog
+* Wed Sep 02 2026 Gabriel Marques Ferrarezi <110578985+gabrielmf1998@users.noreply.github.com> - 1.2.1-1
+- Update check is on demand only: the daily background check is gone
+
 * Wed Sep 02 2026 Gabriel Marques Ferrarezi <110578985+gabrielmf1998@users.noreply.github.com> - 1.2.0-1
 - 26 icon styles, 25 animations (glitch, crazy rainbow, neon, jelly...), 24 colour presets
 - Built-in update checker with a one-click upgrade

@@ -589,10 +589,13 @@ class SettingsWindow(QWidget):
         actions.addStretch(1)
         box_layout.addLayout(actions)
 
-        self.auto_check = QCheckBox("Check automatically once a day")
-        self.auto_check.setChecked(bool(self.config["check_updates"]))
-        self.auto_check.toggled.connect(lambda v: self._set("check_updates", bool(v)))
-        box_layout.addWidget(self.auto_check)
+        hint = QLabel(
+            "MicWatch never checks on its own — it only asks GitHub when you press "
+            "the button."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #8b949e;")
+        box_layout.addWidget(hint)
         layout.addWidget(box)
 
         note = QLabel(
@@ -706,7 +709,7 @@ class SettingsWindow(QWidget):
         self.check_button.setEnabled(False)
         self.check_button.setText("Checking…")
         self.update_status.setText("Asking GitHub for the latest release…")
-        self.tray.check_updates()
+        self.tray.check_updates(announce=False)
 
     def show_update_result(self, release, newer: bool) -> None:
         """Called by the tray when a check finishes, manual or automatic."""

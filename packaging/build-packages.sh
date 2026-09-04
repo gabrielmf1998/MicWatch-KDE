@@ -5,7 +5,7 @@ set -euo pipefail
 
 NAME=micwatch-kde
 BIN=micwatch
-VERSION=1.2.0
+VERSION=1.2.1
 RELEASE=1
 MAINT="Gabriel Marques Ferrarezi <110578985+gabrielmf1998@users.noreply.github.com>"
 URL="https://github.com/gabrielmf1998/MicWatch-KDE"
