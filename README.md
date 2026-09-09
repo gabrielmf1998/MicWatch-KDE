@@ -3,8 +3,9 @@
 A microphone in-use tray indicator for PipeWire, built for KDE Plasma.
 
 It lights up when the microphone is **actually being used** — you decide what that means,
-with a threshold in dBFS you set yourself — and it lets you **mute one application's
-microphone without touching the others**.
+with a threshold in dBFS you set yourself — it lets you **mute one application's microphone
+without touching the others**, and it can do that from a **global keyboard shortcut** that
+works even inside a fullscreen game.
 
 ![Icon styles and states](docs/states.png)
 
@@ -33,9 +34,9 @@ curl -fsSL https://raw.githubusercontent.com/gabrielmf1998/MicWatch-KDE/main/ins
 Or grab a package from the [latest release](https://github.com/gabrielmf1998/MicWatch-KDE/releases/latest):
 
 ```sh
-sudo dnf install ./micwatch-kde-1.2.1-1.fc46.noarch.rpm       # Fedora
-sudo apt install ./micwatch-kde_1.2.1-1_all.deb               # Debian / Ubuntu
-sudo pacman -U ./micwatch-kde-1.2.1-1-any.pkg.tar.zst         # Arch
+sudo dnf install ./micwatch-kde-1.3.0-1.fc46.noarch.rpm       # Fedora
+sudo apt install ./micwatch-kde_1.3.0-1_all.deb               # Debian / Ubuntu
+sudo pacman -U ./micwatch-kde-1.3.0-1-any.pkg.tar.zst         # Arch
 chmod +x MicWatch-KDE-x86_64.AppImage && ./MicWatch-KDE-x86_64.AppImage
 ```
 
@@ -101,9 +102,45 @@ next to each mute box, so you can ride one program's mic gain without touching t
 While everything recording is muted, the tray icon turns red with a slash and MicWatch
 stops metering — it will not open the microphone to measure something that is silent.
 
+## Applications and shortcuts
+
+MicWatch keeps a list of everything that has used your microphone — browsers included —
+so you can act on an application even while it is idle:
+
+![Apps and shortcuts](docs/settings-apps.png)
+
+Each row gives you a **mute** box, the **capture volume** while it is recording, and a
+**global shortcut**. Pressing that combination toggles the mute for that one application:
+your call keeps working while a game, a recorder or a browser tab hears silence. Muting an
+idle app is remembered, so it applies the moment that app opens the microphone again.
+
+Two more shortcuts cover everything at once: *mute every recording app* and *mute the
+input device*.
+
+### How the shortcuts work
+
+A Qt shortcut only fires while the window has focus, which is useless mid-call, so
+MicWatch reads the keyboards directly from `/dev/input`. The combination then works on
+Wayland and X11, in a fullscreen game, whatever has focus. Any combination KDE would
+accept works — `Shift+B`, `Ctrl+Alt+M`, `Meta+F9`, `Ctrl+Shift+PgDown` — recorded the same
+way KDE records them: click the button and press the keys.
+
+Nothing is grabbed and nothing is logged: the listener only compares each key press
+against the combinations you configured, and it does not even start until you set one.
+
+Two requirements, both checked in the UI, which tells you exactly what to do if either is
+missing:
+
+- the `python3-evdev` package (a *Recommends* of the native packages, so it usually comes
+  along)
+- your user in the `input` group — `sudo usermod -aG input $USER`, then log back in
+
 ## Features
 
 - **Per-application mute** from the tray menu, remembered across restarts of the app.
+- **Global shortcut per application** (`Shift+B`, `Ctrl+Alt+M`, …) that works in fullscreen.
+- **List of every app that has used the mic**, browsers included, with mute and shortcut
+  for each — even while they are idle.
 - **Per-application capture volume** (0–150%) from the Detection tab.
 - **Device mute** for every application at once.
 - **Icon size slider** — every style fills the tray slot at 100%, dial it down to taste.
@@ -187,6 +224,7 @@ micwatch/icons.py       every icon painted at runtime with QPainter
 micwatch/tray.py        state machine: idle / open-quiet / in-use
 micwatch/settings.py    settings window with the live dB meter
 micwatch/autostart.py   XDG autostart entry
+micwatch/hotkeys.py     global shortcuts read from /dev/input
 packaging/              rpm spec, deb/arch/AppImage build script
 assets/gen_icons.py     regenerates the application icons
 ```

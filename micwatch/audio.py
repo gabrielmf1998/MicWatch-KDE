@@ -262,6 +262,7 @@ class MicMonitor(QObject):
         return False
 
     def preferred_source(self) -> str:
+        """Which device the level meter should listen to."""
         chosen = self.config.get("meter_source", "auto")
         if chosen and chosen != "auto":
             return chosen
@@ -272,6 +273,20 @@ class MicMonitor(QObject):
             if stream.source:
                 return stream.source
         return default_source()
+
+    def input_devices(self, include_virtual: bool = False) -> list[SourceInfo]:
+        """Every real capture device, so the user can pick among several mics."""
+        devices = [s for s in self.sources.values() if s.real]
+        if include_virtual:
+            devices += [s for s in self.sources.values() if s.virtual]
+        return sorted(devices, key=lambda s: s.description.lower())
+
+    def device_muted(self, name: str) -> bool:
+        return self.source_muted(name)
+
+    def stream_is_silent(self, stream: StreamInfo) -> bool:
+        """A stream is silent when it is muted, or its device is."""
+        return stream.muted or self.source_muted(stream.source)
 
 
 class LevelMeter(QObject):

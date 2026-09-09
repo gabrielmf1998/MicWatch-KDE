@@ -9,7 +9,7 @@ from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon
 from PySide6.QtWidgets import QMenu, QMessageBox, QSystemTrayIcon
 
-from . import autostart, icons, updates
+from . import autostart, hotkeys, icons, updates
 from .audio import LevelMeter, MicMonitor, set_source_mute, set_stream_mute
 from .config import APP_NAME, MIN_DB
 
@@ -60,6 +60,12 @@ class MicWatchTray(QObject):
         self.updates = updates.UpdateChecker(self)
         self.updates.checked.connect(self._on_update_checked)
 
+        self.hotkeys = hotkeys.HotkeyListener(self)
+        self.hotkeys.activated.connect(self._on_hotkey)
+        self.hotkeys.status_changed.connect(self._on_hotkey_status)
+        self.hotkey_status = (False, "Not listening: no shortcut configured yet.")
+        self.apply_shortcuts()
+
         self.monitor.start()
         self._refresh_all()
         self.tray.show()
@@ -107,12 +113,36 @@ class MicWatchTray(QObject):
         if apps or self.config["muted_apps"]:
             menu.addSeparator()
 
-        device = QAction("Mute the microphone device", menu)
-        device.setCheckable(True)
-        device.setChecked(self.monitor.source_muted(self.monitor.preferred_source()))
-        device.setToolTip("Mutes the input device itself, for every application")
-        device.toggled.connect(self.set_device_mute)
-        menu.addAction(device)
+        devices = self.monitor.input_devices(self.config["include_virtual"])
+        in_use = {s.source for s in self.monitor.streams}
+        default = self.monitor.preferred_source()
+        if len(devices) == 1:
+            source = devices[0]
+            device = QAction(f"Mute {source.description}", menu)
+            device.setCheckable(True)
+            device.setChecked(source.muted)
+            device.setToolTip("Mutes the input device itself, for every application")
+            device.toggled.connect(
+                lambda checked, n=source.name: self.set_device_mute(n, checked)
+            )
+            menu.addAction(device)
+        elif devices:
+            submenu = menu.addMenu("Microphone devices")
+            for source in devices:
+                marks = []
+                if source.name in in_use:
+                    marks.append("in use")
+                elif source.name == default:
+                    marks.append("default")
+                label = source.description + (f"  ({', '.join(marks)})" if marks else "")
+                action = QAction(f"Mute {label}", submenu)
+                action.setCheckable(True)
+                action.setChecked(source.muted)
+                action.setToolTip(f"Mute {source.description} for every application")
+                action.toggled.connect(
+                    lambda checked, n=source.name: self.set_device_mute(n, checked)
+                )
+                submenu.addAction(action)
         menu.addSeparator()
 
         settings_action = QAction("Settings…", menu)
@@ -155,8 +185,9 @@ class MicWatchTray(QObject):
             self.config.save()
         QTimer.singleShot(150, self._after_mute_change)
 
-    def set_device_mute(self, mute: bool) -> None:
-        set_source_mute(self.monitor.preferred_source(), mute)
+    def set_device_mute(self, name: str, mute: bool) -> None:
+        """Mute one input device, for every application at once."""
+        set_source_mute(name or self.monitor.preferred_source(), mute)
         QTimer.singleShot(150, self._after_mute_change)
 
     def _after_mute_change(self) -> None:
@@ -264,13 +295,109 @@ class MicWatchTray(QObject):
             self.open_settings()
 
     def _on_streams(self, streams) -> None:
+        self._remember_apps(streams)
         self._refresh_all()
         self._rebuild_menu()
 
+    # -- the apps that have used the microphone --------------------------
+    def _remember_apps(self, streams) -> None:
+        """Keep a list of everything that has used the mic, so a shortcut can be
+        bound to an app that is not recording right now."""
+        known = {entry.get("name"): dict(entry) for entry in self.config["known_apps"]}
+        changed = False
+        now = time.time()
+        for stream in streams:
+            entry = known.get(stream.app)
+            if entry is None:
+                known[stream.app] = {
+                    "name": stream.app,
+                    "binary": stream.binary,
+                    "device": stream.source_desc,
+                    "last_seen": now,
+                }
+                changed = True
+            else:
+                if entry.get("device") != stream.source_desc:
+                    entry["device"] = stream.source_desc
+                    changed = True
+                entry["last_seen"] = now
+        if changed:
+            ordered = sorted(known.values(), key=lambda e: e.get("last_seen", 0), reverse=True)
+            self.config["known_apps"] = ordered[:40]
+            self.config.save()
+
+    def known_apps(self) -> list[dict]:
+        """Apps recording now first, then everything seen before."""
+        recording = self.monitor.recording_apps()
+        seen = {entry.get("name"): entry for entry in self.config["known_apps"]}
+        rows = []
+        for name in recording:
+            entry = seen.pop(name, {"name": name})
+            rows.append({**entry, "recording": True})
+        for entry in sorted(seen.values(), key=lambda e: e.get("last_seen", 0), reverse=True):
+            rows.append({**entry, "recording": False})
+        return rows
+
+    # -- global shortcuts ------------------------------------------------
+    def apply_shortcuts(self) -> None:
+        bindings: dict[str, str] = {}
+        for app, combo in (self.config["app_shortcuts"] or {}).items():
+            if combo:
+                bindings[f"app:{app}"] = combo
+        if self.config["shortcut_mute_all"]:
+            bindings["all"] = self.config["shortcut_mute_all"]
+        if self.config["shortcut_mute_device"]:
+            bindings["device"] = self.config["shortcut_mute_device"]
+        self.hotkeys.set_bindings(bindings)
+        if bindings:
+            if not self.hotkeys.isRunning():
+                self.hotkeys.start()
+        elif self.hotkeys.isRunning():
+            # no shortcut left: stop reading the keyboards altogether
+            self.hotkeys.stop()
+            self._on_hotkey_status(False, "Not listening: no shortcut configured yet.")
+
+    def _on_hotkey_status(self, ok: bool, message: str) -> None:
+        self.hotkey_status = (ok, message)
+        if self._settings is not None:
+            self._settings.show_hotkey_status(ok, message)
+
+    def _app_is_muted(self, app: str) -> bool:
+        streams = self.monitor.streams_of(app)
+        if streams:
+            return all(s.muted for s in streams)
+        return app in self.config["muted_apps"]
+
+    def _on_hotkey(self, action: str) -> None:
+        if action.startswith("app:"):
+            app = action[4:]
+            mute = not self._app_is_muted(app)
+            self.set_app_mute(app, mute)
+            self._hotkey_feedback(f"{app} {'muted' if mute else 'unmuted'}")
+        elif action == "all":
+            apps = self.monitor.recording_apps() or list(self.config["muted_apps"])
+            if not apps:
+                self._hotkey_feedback("Nothing is recording")
+                return
+            mute = not all(self._app_is_muted(a) for a in apps)
+            for app in apps:
+                self.set_app_mute(app, mute)
+            self._hotkey_feedback(("Muted: " if mute else "Unmuted: ") + ", ".join(apps))
+        elif action == "device":
+            source = self.monitor.preferred_source()
+            mute = not self.monitor.source_muted(source)
+            self.set_device_mute(source, mute)
+            self._hotkey_feedback(f"Microphone device {'muted' if mute else 'unmuted'}")
+
+    def _hotkey_feedback(self, text: str) -> None:
+        if self.config["shortcut_feedback"]:
+            self.tray.showMessage(APP_NAME, text, self.tray.icon(), 2000)
+
     def _muted_now(self) -> bool:
+        """Muted when everything being counted is silent — per stream or per device."""
         streams = self.monitor.streams
-        if streams and all(s.muted for s in streams):
-            return True
+        if streams:
+            return all(self.monitor.stream_is_silent(s) for s in streams)
         return self.monitor.source_muted(self.monitor.preferred_source())
 
     def _on_meter_failed(self, reason: str) -> None:
@@ -441,6 +568,7 @@ class MicWatchTray(QObject):
         self._sync_animation()
 
     def apply_config(self) -> None:
+        self.apply_shortcuts()
         self.monitor.apply_config()
         self._refresh_all()
         self._sync_animation()
@@ -459,6 +587,7 @@ class MicWatchTray(QObject):
         from PySide6.QtWidgets import QApplication
 
         self._anim.stop()
+        self.hotkeys.stop()
         self.meter.stop()
         self.monitor.stop()
         self.tray.hide()

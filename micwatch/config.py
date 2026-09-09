@@ -43,6 +43,13 @@ DEFAULTS: dict = {
     "ignore_apps": [],            # lower-case app names to never count
     "muted_apps": [],             # apps kept muted, by application name
     "remember_mutes": True,       # re-apply those mutes to new streams
+    "known_apps": [],             # every app seen using the mic: {name, binary, device, last_seen}
+
+    # --- global shortcuts (read from /dev/input, work in fullscreen) ---
+    "app_shortcuts": {},          # {"vesktop": "Ctrl+Alt+D"}
+    "shortcut_mute_all": "",      # toggle every recording app at once
+    "shortcut_mute_device": "",   # toggle the input device itself
+    "shortcut_feedback": True,    # a tray notification when a shortcut fires
     "poll_ms": 1500,              # safety-net poll on top of pactl events
 }
 

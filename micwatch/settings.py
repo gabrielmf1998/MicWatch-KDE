@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import math
+import time
 
 from PySide6.QtCore import QRectF, QSize, Qt, QTimer, QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QKeySequence, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QKeySequenceEdit,
     QColorDialog,
     QComboBox,
     QDoubleSpinBox,
@@ -20,6 +24,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QSlider,
     QSpinBox,
     QTabWidget,
@@ -28,7 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import autostart, icons, updates
+from . import autostart, hotkeys, icons, updates
 from .audio import list_sources, set_stream_volume
 from .config import APP_NAME, MIN_DB
 
@@ -185,8 +191,98 @@ class IconPreview(QWidget):
         p.end()
 
 
+class ShortcutDialog(QDialog):
+    """Capture one key combination, the way KDE's shortcut editor does."""
+
+    def __init__(self, current: str, title: str, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(360)
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel("Press the combination you want to use:"))
+        self.edit = QKeySequenceEdit(QKeySequence(current))
+        self.edit.setMaximumSequenceLength(1)
+        self.edit.keySequenceChanged.connect(self._validate)
+        layout.addWidget(self.edit)
+
+        self.note = QLabel("")
+        self.note.setWordWrap(True)
+        self.note.setStyleSheet("color: #8b949e;")
+        layout.addWidget(self.note)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        clear = buttons.addButton("Clear", QDialogButtonBox.ResetRole)
+        clear.clicked.connect(self.edit.clear)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self._ok = buttons.button(QDialogButtonBox.Ok)
+        self.edit.setFocus()
+        self._validate()
+
+    def _validate(self) -> None:
+        text = self.value()
+        if not text:
+            self.note.setText("Empty: the shortcut will be removed.")
+            self._ok.setEnabled(True)
+            return
+        if not hotkeys.is_valid(text):
+            self.note.setText(f"“{text}” is not a key MicWatch can listen for.")
+            self._ok.setEnabled(False)
+            return
+        if not hotkeys.has_modifier(text):
+            self.note.setText(
+                f"“{text}” has no modifier — it will fire whenever you type that key. "
+                "Add Ctrl, Alt, Shift or Meta."
+            )
+        else:
+            self.note.setText(f"Shortcut: {text}")
+        self._ok.setEnabled(True)
+
+    def value(self) -> str:
+        return self.edit.keySequence().toString(QKeySequence.PortableText)
+
+
+class ShortcutButton(QPushButton):
+    """Shows the current combination and opens the capture dialog."""
+
+    def __init__(self, label: str, parent=None) -> None:
+        super().__init__(parent)
+        self._label = label
+        self._value = ""
+        self._on_change = None
+        self.setMinimumWidth(120)
+        self.setMaximumWidth(195)
+        self.clicked.connect(self._edit)
+        self.set_value("")
+
+    def set_value(self, value: str) -> None:
+        self._value = value or ""
+        self.setText(self._value or "Set shortcut…")
+        self.setToolTip(
+            f"Global shortcut for {self._label}" if self._value
+            else f"Click to record a global shortcut for {self._label}"
+        )
+
+    def value(self) -> str:
+        return self._value
+
+    def on_change(self, callback) -> None:
+        self._on_change = callback
+
+    def _edit(self) -> None:
+        dialog = ShortcutDialog(self._value, f"Shortcut — {self._label}", self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        value = hotkeys.normalise(dialog.value())
+        self.set_value(value)
+        if self._on_change is not None:
+            self._on_change(value)
+
+
 class AppRow(QWidget):
-    """One recording application: mute it, or ride its capture volume."""
+    """One application: mute it, ride its capture volume, bind a shortcut."""
 
     def __init__(self, app: str, tray, parent=None) -> None:
         super().__init__(parent)
@@ -197,35 +293,68 @@ class AppRow(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.name = QLabel(app)
-        self.name.setToolTip(app)
+        self.name.setMinimumWidth(120)
+        self.status = QLabel("")
+        self.status.setStyleSheet("color: #8b949e;")
+        self.status.setMinimumWidth(0)
+        # let the middle column give way instead of pushing the buttons off-screen
+        self.status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.volume = QSlider(Qt.Horizontal)
         self.volume.setRange(0, 150)
-        self.volume.setFixedWidth(130)
+        self.volume.setFixedWidth(90)
         self.volume.valueChanged.connect(self._volume_changed)
         self.percent = QLabel()
         self.percent.setMinimumWidth(42)
         self.mute = QCheckBox("Mute")
         self.mute.toggled.connect(self._mute_toggled)
-        layout.addWidget(self.name, 1)
+        self.shortcut = ShortcutButton(app)
+        self.shortcut.on_change(self._shortcut_changed)
+        self.forget = QToolButton()
+        self.forget.setText("✕")
+        self.forget.setAutoRaise(True)
+        self.forget.setToolTip("Forget this application")
+        self.forget.clicked.connect(self._forget)
+
+        layout.addWidget(self.name)
+        layout.addWidget(self.status, 1)
         layout.addWidget(self.volume)
         layout.addWidget(self.percent)
         layout.addWidget(self.mute)
+        layout.addWidget(self.shortcut)
+        layout.addWidget(self.forget)
 
-    def update_from(self, streams) -> None:
-        if not streams:
-            return
+    def update_from(self, entry: dict) -> None:
         self._busy = True
-        muted = all(s.muted for s in streams)
-        volume = max(s.volume for s in streams)
+        streams = self.tray.monitor.streams_of(self.app)
+        recording = bool(streams)
+        if recording:
+            volume = max(s.volume for s in streams)
+            muted = all(s.muted for s in streams)
+            device = ", ".join(dict.fromkeys(s.source_desc for s in streams))
+            self.status.setText(f"recording · {device}")
+            self.status.setToolTip(device)
+            self.volume.setVisible(True)
+            self.percent.setVisible(True)
+            if not self.volume.isSliderDown():
+                self.volume.setValue(volume)
+            self.percent.setText(f"{volume}%")
+            self.volume.setEnabled(not muted)
+        else:
+            muted = self.app in self.tray.config["muted_apps"]
+            self.volume.setVisible(False)
+            self.percent.setVisible(False)
+            device = entry.get("device") or ""
+            when = entry.get("last_seen")
+            ago = _ago(when) if when else "seen before"
+            self.status.setText(f"idle · {ago}" + (f" · {device}" if device else ""))
+        self.name.setText(("● " if recording else "○ ") + self.app)
         self.mute.setChecked(muted)
-        if not self.volume.isSliderDown():
-            self.volume.setValue(volume)
-        self.percent.setText(f"{volume}%")
-        sources = ", ".join(dict.fromkeys(s.source_desc for s in streams))
-        pid = streams[0].pid
-        self.name.setText(f"{self.app}" + (f"  ·  pid {pid}" if pid else ""))
-        self.name.setToolTip(sources)
-        self.volume.setEnabled(not muted)
+        self.mute.setToolTip(
+            "Mute this application's microphone" if recording
+            else "Keep this application muted; it applies the moment it opens the mic"
+        )
+        self.forget.setVisible(not recording)
+        self.shortcut.set_value(self.tray.config["app_shortcuts"].get(self.app, ""))
         self._busy = False
 
     def _mute_toggled(self, checked: bool) -> None:
@@ -238,6 +367,46 @@ class AppRow(QWidget):
             return
         for stream in self.tray.monitor.streams_of(self.app):
             set_stream_volume(stream.index, value)
+
+    def _shortcut_changed(self, value: str) -> None:
+        shortcuts = dict(self.tray.config["app_shortcuts"])
+        if value:
+            shortcuts[self.app] = value
+        else:
+            shortcuts.pop(self.app, None)
+        self.tray.config["app_shortcuts"] = shortcuts
+        self.tray.config.save()
+        self.tray.apply_shortcuts()
+        window = self.window()
+        if hasattr(window, "show_hotkey_status"):
+            ok, message = self.tray.hotkey_status
+            window.show_hotkey_status(ok, message)
+
+    def _forget(self) -> None:
+        config = self.tray.config
+        config["known_apps"] = [
+            e for e in config["known_apps"] if e.get("name") != self.app
+        ]
+        config["app_shortcuts"] = {
+            k: v for k, v in config["app_shortcuts"].items() if k != self.app
+        }
+        config["muted_apps"] = [a for a in config["muted_apps"] if a != self.app]
+        config.save()
+        self.tray.apply_shortcuts()
+        window = self.window()
+        if hasattr(window, "refresh_streams"):
+            window.refresh_streams()
+
+
+def _ago(when: float) -> str:
+    delta = max(0.0, time.time() - float(when))
+    if delta < 90:
+        return "just now"
+    if delta < 3600:
+        return f"{int(delta // 60)} min ago"
+    if delta < 86400:
+        return f"{int(delta // 3600)} h ago"
+    return f"{int(delta // 86400)} d ago"
 
 
 class ColorButton(QPushButton):
@@ -264,7 +433,7 @@ class SettingsWindow(QWidget):
         self._calibrating = False
         self._calibration_peak = 0.0
         self.setWindowTitle(f"{APP_NAME} — Settings")
-        self.resize(560, 720)
+        self.resize(730, 780)
         self.setWindowIcon(
             icons.render_icon(config["icon_style"], QColor(config["color_active"]))
         )
@@ -276,6 +445,7 @@ class SettingsWindow(QWidget):
         tabs = QTabWidget(self)
         tabs.addTab(self._appearance_tab(), "Appearance")
         tabs.addTab(self._detection_tab(), "Detection")
+        tabs.addTab(self._apps_tab(), "Apps && shortcuts")
         tabs.addTab(self._behaviour_tab(), "Behaviour")
         root.addWidget(tabs, 1)
 
@@ -490,30 +660,92 @@ class SettingsWindow(QWidget):
         ignore_row.addRow("Ignore apps", self.ignore)
         layout.addLayout(ignore_row)
 
-        self.streams_box = QGroupBox("Applications recording now")
+        pointer = QLabel(
+            "Per-application mute, capture volume and shortcuts live in the "
+            "“Apps & shortcuts” tab."
+        )
+        pointer.setWordWrap(True)
+        pointer.setStyleSheet("color: #8b949e;")
+        layout.addWidget(pointer)
+        layout.addStretch(1)
+        return page
+
+    def _apps_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        intro = QLabel(
+            "Everything that has used your microphone — browsers included. Mute one "
+            "application without touching the others, or give it a global shortcut "
+            "that works even inside a fullscreen game."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color: #8b949e;")
+        layout.addWidget(intro)
+
+        self.streams_box = QGroupBox("Applications")
         self.streams_layout = QVBoxLayout(self.streams_box)
-        self.who = QLabel("Nothing is recording right now.")
+        self.who = QLabel("Nothing has used the microphone yet.")
         self.who.setWordWrap(True)
         self.who.setStyleSheet("color: #8b949e;")
         self.streams_layout.addWidget(self.who)
-        layout.addWidget(self.streams_box)
+        self.streams_layout.addStretch(1)       # rows stay packed at the top
 
-        hint2 = QLabel(
-            "Muting here mutes only that application's capture stream — everything else "
-            "keeps hearing the microphone. Muted apps are remembered and re-muted when "
-            "they open the mic again (Behaviour tab)."
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(self.streams_box)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        layout.addWidget(scroll, 1)
+
+        box = QGroupBox("Global shortcuts")
+        box_layout = QVBoxLayout(box)
+        form = QFormLayout()
+        self.sc_all = ShortcutButton("mute everything")
+        self.sc_all.set_value(self.config["shortcut_mute_all"])
+        self.sc_all.on_change(lambda v: self._set_global_shortcut("shortcut_mute_all", v))
+        form.addRow("Mute / unmute every recording app", self.sc_all)
+        self.sc_device = ShortcutButton("mute the input device")
+        self.sc_device.set_value(self.config["shortcut_mute_device"])
+        self.sc_device.on_change(
+            lambda v: self._set_global_shortcut("shortcut_mute_device", v)
         )
-        hint2.setWordWrap(True)
-        hint2.setStyleSheet("color: #8b949e;")
-        layout.addWidget(hint2)
-        layout.addStretch(1)
+        form.addRow("Mute / unmute the input device", self.sc_device)
+        box_layout.addLayout(form)
+
+        self.feedback = QCheckBox("Show a notification when a shortcut fires")
+        self.feedback.setChecked(bool(self.config["shortcut_feedback"]))
+        self.feedback.toggled.connect(lambda v: self._set("shortcut_feedback", bool(v)))
+        box_layout.addWidget(self.feedback)
+
+        self.hotkey_note = QLabel("")
+        self.hotkey_note.setWordWrap(True)
+        self.hotkey_note.setStyleSheet("color: #8b949e;")
+        box_layout.addWidget(self.hotkey_note)
+        layout.addWidget(box)
 
         self._rows: dict[str, AppRow] = {}
         self._who_timer = QTimer(self)
         self._who_timer.timeout.connect(self.refresh_streams)
-        self._who_timer.start(700)
+        self._who_timer.start(900)
         self.refresh_streams()
+        ok, message = self.tray.hotkey_status
+        self.show_hotkey_status(ok, message)
         return page
+
+    def _set_global_shortcut(self, key: str, value: str) -> None:
+        self.config[key] = value
+        self.config.save()
+        self.tray.apply_shortcuts()
+        ok, message = self.tray.hotkey_status
+        self.show_hotkey_status(ok, message)
+
+    def show_hotkey_status(self, ok: bool, message: str) -> None:
+        if not hasattr(self, "hotkey_note"):
+            return
+        prefix = "Global shortcuts: " if ok else "Global shortcuts unavailable — "
+        self.hotkey_note.setText(prefix + message)
+        self.hotkey_note.setStyleSheet("color: %s;" % ("#8b949e" if ok else "#e3b341"))
 
     def _behaviour_tab(self) -> QWidget:
         page = QWidget()
@@ -689,21 +921,23 @@ class SettingsWindow(QWidget):
         self.tray.sync_autostart_action()
 
     def refresh_streams(self) -> None:
-        """Keep one row per recording application, live."""
-        apps = self.tray.monitor.recording_apps()
+        """One row per application, recording ones first, live."""
+        entries = self.tray.known_apps()
+        names = [e["name"] for e in entries]
         for app in list(self._rows):
-            if app not in apps:
+            if app not in names:
                 row = self._rows.pop(app)
                 self.streams_layout.removeWidget(row)
                 row.deleteLater()
-        for app in apps:
+        for position, entry in enumerate(entries):
+            app = entry["name"]
             row = self._rows.get(app)
             if row is None:
                 row = AppRow(app, self.tray, self.streams_box)
                 self._rows[app] = row
-                self.streams_layout.addWidget(row)
-            row.update_from(self.tray.monitor.streams_of(app))
-        self.who.setVisible(not apps)
+            self.streams_layout.insertWidget(position, row)
+            row.update_from(entry)
+        self.who.setVisible(not entries)
 
     def _check_updates(self) -> None:
         self.check_button.setEnabled(False)
@@ -712,7 +946,7 @@ class SettingsWindow(QWidget):
         self.tray.check_updates(announce=False)
 
     def show_update_result(self, release, newer: bool) -> None:
-        """Called by the tray when a check finishes, manual or automatic."""
+        """Called by the tray when a check finishes."""
         self.check_button.setEnabled(True)
         self.check_button.setText("Check for updates")
         if release is None:
