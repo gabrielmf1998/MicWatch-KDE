@@ -34,9 +34,9 @@ curl -fsSL https://raw.githubusercontent.com/gabrielmf1998/MicWatch-KDE/main/ins
 Or grab a package from the [latest release](https://github.com/gabrielmf1998/MicWatch-KDE/releases/latest):
 
 ```sh
-sudo dnf install ./micwatch-kde-1.3.0-1.fc46.noarch.rpm       # Fedora
-sudo apt install ./micwatch-kde_1.3.0-1_all.deb               # Debian / Ubuntu
-sudo pacman -U ./micwatch-kde-1.3.0-1-any.pkg.tar.zst         # Arch
+sudo dnf install ./micwatch-kde-1.3.1-1.fc46.noarch.rpm       # Fedora
+sudo apt install ./micwatch-kde_1.3.1-1_all.deb               # Debian / Ubuntu
+sudo pacman -U ./micwatch-kde-1.3.1-1-any.pkg.tar.zst         # Arch
 chmod +x MicWatch-KDE-x86_64.AppImage && ./MicWatch-KDE-x86_64.AppImage
 ```
 
@@ -96,8 +96,15 @@ Microphone in use — vesktop  ·  Level: -31 dB
 ```
 
 Muting an app mutes **only that application's capture stream** (`source-output`), so a
-call keeps working while a game, a browser tab or a recorder hears silence. The device
-entry mutes the input for everyone at once, the way a hardware switch would.
+call keeps working while a game, a browser tab or a recorder hears silence.
+
+![Tray menu](docs/tray-menu.png)
+
+Right at the top of the menu sits **Mute Mic** — the panic button. It mutes every input
+device at once, the way a hardware switch would: no application hears anything, whichever
+microphone it opened. The tray icon turns red with a slash even when nothing is recording,
+so you can see the mic is off at a glance. Bind it to a shortcut in
+**Apps & shortcuts → Mute / unmute the microphone itself**.
 
 Muted apps are remembered by name: when the program opens the microphone again — after a
 restart, or in a new call — MicWatch re-mutes it automatically. Turn that off in

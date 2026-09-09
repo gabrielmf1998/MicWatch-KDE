@@ -715,12 +715,12 @@ class SettingsWindow(QWidget):
         self.sc_all.set_value(self.config["shortcut_mute_all"])
         self.sc_all.on_change(lambda v: self._set_global_shortcut("shortcut_mute_all", v))
         form.addRow("Mute / unmute every recording app", self.sc_all)
-        self.sc_device = ShortcutButton("mute the input device")
+        self.sc_device = ShortcutButton("mute the microphone")
         self.sc_device.set_value(self.config["shortcut_mute_device"])
         self.sc_device.on_change(
             lambda v: self._set_global_shortcut("shortcut_mute_device", v)
         )
-        form.addRow("Mute / unmute the input device", self.sc_device)
+        form.addRow("Mute / unmute the microphone itself", self.sc_device)
         box_layout.addLayout(form)
 
         self.feedback = QCheckBox("Show a notification when a shortcut fires")

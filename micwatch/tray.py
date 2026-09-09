@@ -93,6 +93,29 @@ class MicWatchTray(QObject):
             menu.addAction(update_action)
         menu.addSeparator()
 
+        # the panic button: kills the microphone itself, for every application
+        mic_action = QAction("Mute Mic", menu)
+        mic_action.setCheckable(True)
+        mic_action.setChecked(self.mic_muted())
+        mic_action.setToolTip(
+            "Mute the microphone itself — no application can hear anything"
+        )
+        font = mic_action.font()
+        font.setBold(True)
+        mic_action.setFont(font)
+        mic_action.setIcon(
+            icons.render_icon(
+                self.config["icon_style"],
+                QColor(self.config["color_muted"]),
+                level=0.2,
+                muted=True,
+                px=64,
+            )
+        )
+        mic_action.toggled.connect(self.set_mic_mute)
+        menu.addAction(mic_action)
+        menu.addSeparator()
+
         apps = self.monitor.recording_apps()
         for app in apps:
             streams = self.monitor.streams_of(app)
@@ -183,6 +206,17 @@ class MicWatchTray(QObject):
         if remembered != self.config["muted_apps"]:
             self.config["muted_apps"] = remembered
             self.config.save()
+        QTimer.singleShot(150, self._after_mute_change)
+
+    def mic_muted(self) -> bool:
+        """True when every real input device is muted."""
+        devices = self.monitor.input_devices()
+        return bool(devices) and all(device.muted for device in devices)
+
+    def set_mic_mute(self, mute: bool) -> None:
+        """Mute the microphone itself: every input device, for every application."""
+        for device in self.monitor.input_devices():
+            set_source_mute(device.name, mute)
         QTimer.singleShot(150, self._after_mute_change)
 
     def set_device_mute(self, name: str, mute: bool) -> None:
@@ -384,10 +418,9 @@ class MicWatchTray(QObject):
                 self.set_app_mute(app, mute)
             self._hotkey_feedback(("Muted: " if mute else "Unmuted: ") + ", ".join(apps))
         elif action == "device":
-            source = self.monitor.preferred_source()
-            mute = not self.monitor.source_muted(source)
-            self.set_device_mute(source, mute)
-            self._hotkey_feedback(f"Microphone device {'muted' if mute else 'unmuted'}")
+            mute = not self.mic_muted()
+            self.set_mic_mute(mute)
+            self._hotkey_feedback(f"Microphone {'muted' if mute else 'unmuted'}")
 
     def _hotkey_feedback(self, text: str) -> None:
         if self.config["shortcut_feedback"]:
@@ -398,7 +431,7 @@ class MicWatchTray(QObject):
         streams = self.monitor.streams
         if streams:
             return all(self.monitor.stream_is_silent(s) for s in streams)
-        return self.monitor.source_muted(self.monitor.preferred_source())
+        return self.mic_muted()
 
     def _on_meter_failed(self, reason: str) -> None:
         """The capture died (device unplugged, PipeWire restart): drop it and retry."""
@@ -442,7 +475,8 @@ class MicWatchTray(QObject):
     def _evaluate(self, force: bool = False) -> None:
         streams = self.monitor.streams
         if not streams:
-            state = IDLE
+            # a hard-muted mic shows as muted even when nothing is recording
+            state = MUTED if self._muted_now() else IDLE
         elif self._muted_now():
             state = MUTED
         elif not self.config["threshold_enabled"]:

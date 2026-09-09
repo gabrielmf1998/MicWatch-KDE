@@ -1,5 +1,5 @@
 Name:           micwatch-kde
-Version:        1.3.0
+Version:        1.3.1
 Release:        1%{?dist}
 Summary:        Microphone in-use tray indicator with a user-defined threshold
 
@@ -58,6 +58,9 @@ install -Dm 0644 README.md %{buildroot}%{_datadir}/doc/%{name}/README.md
 %{_datadir}/icons/hicolor/*/apps/micwatch.*
 
 %changelog
+* Wed Sep 09 2026 Gabriel Marques Ferrarezi <110578985+gabrielmf1998@users.noreply.github.com> - 1.3.1-1
+- Mute Mic: one tray entry that mutes every input device at once
+
 * Wed Sep 09 2026 Gabriel Marques Ferrarezi <110578985+gabrielmf1998@users.noreply.github.com> - 1.3.0-1
 - Global shortcut per application, read from /dev/input so it works in fullscreen
 - List of every application that has used the microphone, browsers included

@@ -5,7 +5,7 @@ set -euo pipefail
 
 NAME=micwatch-kde
 BIN=micwatch
-VERSION=1.3.0
+VERSION=1.3.1
 RELEASE=1
 MAINT="Gabriel Marques Ferrarezi <110578985+gabrielmf1998@users.noreply.github.com>"
 URL="https://github.com/gabrielmf1998/MicWatch-KDE"
@@ -130,35 +130,48 @@ if AT="$(command -v appimagetool 2>/dev/null)"; then :; else
         && chmod +x "$AT" || AT=""
 fi
 PYVER=3.12
-BASE_URL="$(curl -fsSL "https://api.github.com/repos/niess/python-appimage/releases/tags/python$PYVER" \
-    | tr ',' '\n' | grep '"browser_download_url"' | cut -d'"' -f4 \
-    | grep manylinux2014_x86_64 | head -1)"
-if [ -n "$AT" ] && [ -n "$BASE_URL" ] \
-   && curl -fsSL -o "$WORK/python.AppImage" "$BASE_URL"; then
-    chmod +x "$WORK/python.AppImage"
-    ( cd "$WORK" && ./python.AppImage --appimage-extract >/dev/null )
-    APPDIR="$WORK/squashfs-root"
-    SITE="$APPDIR/opt/python$PYVER/lib/python$PYVER/site-packages"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/micwatch-appimage-base"
+APPDIR="$WORK/squashfs-root"
+SITE="$APPDIR/opt/python$PYVER/lib/python$PYVER/site-packages"
 
-    say "  bundling PySide6 and evdev (a ~150 MB download)"
-    "$APPDIR/AppRun" -m pip install --quiet --no-warn-script-location \
-        PySide6-Essentials evdev >"$WORK/pip.log" 2>&1 \
-        || { tail -5 "$WORK/pip.log"; exit 1; }
+if [ -d "$CACHE" ] && [ -z "${REBUILD_APPIMAGE_BASE:-}" ]; then
+    say "  reusing the cached Python+PySide6 base ($CACHE)"
+    cp -a "$CACHE" "$APPDIR"
+    BASE_URL=cached
+else
+    BASE_URL="$(curl -fsSL "https://api.github.com/repos/niess/python-appimage/releases/tags/python$PYVER" \
+        | tr ',' '\n' | grep '"browser_download_url"' | cut -d'"' -f4 \
+        | grep manylinux2014_x86_64 | head -1)"
+    if [ -n "$BASE_URL" ] && curl -fsSL -o "$WORK/python.AppImage" "$BASE_URL"; then
+        chmod +x "$WORK/python.AppImage"
+        ( cd "$WORK" && ./python.AppImage --appimage-extract >/dev/null )
 
-    # Drop what a tray indicator never touches: QML, Qt translations, tooling.
-    ( cd "$SITE/PySide6" \
-      && rm -rf Qt/qml Qt/translations Qt/metatypes Qt/libexec \
-                Qt/plugins/qmltooling Qt/plugins/sqldrivers Qt/plugins/designer \
-      && rm -f Qt/lib/libQt6Quick*.so.6* Qt/lib/libQt6Qml*.so.6* \
-               Qt/lib/libQt6Designer*.so.6* Qt/lib/libQt6Help*.so.6* \
-               Qt/lib/libQt6Test*.so.6* Qt/lib/libQt6Sql*.so.6* \
-               Qt/lib/libQt6UiTools*.so.6* Qt/lib/libQt6Multimedia*.so.6* \
-      && rm -f QtQuick*.abi3.so QtQml*.abi3.so QtDesigner*.abi3.so \
-               QtHelp*.abi3.so QtTest*.abi3.so QtSql*.abi3.so \
-               QtUiTools*.abi3.so QtMultimedia*.abi3.so )
-    rm -rf "$SITE/pip" "$SITE/setuptools" "$SITE/pkg_resources"
-    find "$SITE" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
+        say "  bundling PySide6 and evdev (a ~150 MB download)"
+        "$APPDIR/AppRun" -m pip install --quiet --no-warn-script-location \
+            PySide6-Essentials evdev >"$WORK/pip.log" 2>&1 \
+            || { tail -5 "$WORK/pip.log"; exit 1; }
 
+        # Drop what a tray indicator never touches: QML, Qt translations, tooling.
+        ( cd "$SITE/PySide6" \
+          && rm -rf Qt/qml Qt/translations Qt/metatypes Qt/libexec \
+                    Qt/plugins/qmltooling Qt/plugins/sqldrivers Qt/plugins/designer \
+          && rm -f Qt/lib/libQt6Quick*.so.6* Qt/lib/libQt6Qml*.so.6* \
+                   Qt/lib/libQt6Designer*.so.6* Qt/lib/libQt6Help*.so.6* \
+                   Qt/lib/libQt6Test*.so.6* Qt/lib/libQt6Sql*.so.6* \
+                   Qt/lib/libQt6UiTools*.so.6* Qt/lib/libQt6Multimedia*.so.6* \
+          && rm -f QtQuick*.abi3.so QtQml*.abi3.so QtDesigner*.abi3.so \
+                   QtHelp*.abi3.so QtTest*.abi3.so QtSql*.abi3.so \
+                   QtUiTools*.abi3.so QtMultimedia*.abi3.so )
+        rm -rf "$SITE/pip" "$SITE/setuptools" "$SITE/pkg_resources"
+        find "$SITE" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
+
+        rm -rf "$CACHE"
+        mkdir -p "$(dirname "$CACHE")"
+        cp -a "$APPDIR" "$CACHE"     # next build skips the download
+    fi
+fi
+
+if [ -n "$AT" ] && [ -d "$APPDIR" ]; then
     install -d "$SITE/micwatch"
     install -m 0644 "$ROOT"/micwatch/*.py "$SITE/micwatch/"
 
