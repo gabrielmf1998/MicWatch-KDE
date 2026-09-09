@@ -47,15 +47,22 @@ git clone https://github.com/gabrielmf1998/MicWatch-KDE.git
 cd MicWatch-KDE && ./install.sh && micwatch
 ```
 
-The AppImage is a thin launcher: it carries MicWatch itself and uses the system
-`python3` + PySide6, so it stays under a megabyte instead of bundling all of Qt.
+The AppImage is **self-contained** — Python, Qt/PySide6 and evdev travel inside it — so it
+runs on any distro, including the ones that do not package PySide6 at all (Ubuntu 24.04).
+Double-clicking it needs `libfuse2`; without it, run
+`./MicWatch-KDE-x86_64.AppImage --appimage-extract-and-run`, or use the installer above,
+which unpacks it into `~/.local` and needs no FUSE.
 
 ### Requirements
 
 - PipeWire with `pw-cat` and `pactl` (`pipewire-utils`, `pulseaudio-utils`)
 - Python 3.11+ and PySide6 (`sudo dnf install python3-pyside6`)
+- optional, only for the global shortcuts: `python3-evdev` and your user in the `input` group
 
-The native packages pull these in for you.
+The native packages pull all of that in. On a distro with no PySide6 package, the
+one-liner installs the self-contained build instead, which carries its own Python and Qt —
+so **every KDE distro is covered**: `.rpm` (Fedora, RHEL), `.deb` (Debian, Ubuntu, Mint),
+`.pkg.tar.zst` (Arch, Manjaro, CachyOS) and the `.AppImage` for everything else.
 
 ## Screenshots
 

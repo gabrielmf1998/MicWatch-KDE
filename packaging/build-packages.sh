@@ -113,44 +113,83 @@ PKGINFO
   LANG=C bsdtar "${TAROPTS[@]}" -cf - .PKGINFO .MTREE usr |
       zstd -q -c -T0 -18 > "$DIST/$NAME-$VERSION-$RELEASE-any.pkg.tar.zst" )
 
-# ── AppImage (thin: system python3 + PySide6) ───────────────
+# ── AppImage (self-contained: Python + PySide6 + evdev) ─────
+# SKIP_APPIMAGE=1 keeps an already-built one, so iterating on the native
+# packages does not re-download 150 MB of Qt every time.
 say "AppImage"
+if [ -n "${SKIP_APPIMAGE:-}" ]; then
+    say "  skipped (SKIP_APPIMAGE set)"
+    AT=""
+    BASE_URL=""
+fi
+if [ -z "${SKIP_APPIMAGE:-}" ]; then
 if AT="$(command -v appimagetool 2>/dev/null)"; then :; else
     AT="$WORK/appimagetool"
     curl -fsSL -o "$AT" \
         https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage \
         && chmod +x "$AT" || AT=""
 fi
-if [ -n "$AT" ]; then
-    APPDIR="$WORK/AppDir"
-    install -d "$APPDIR/usr/share/$NAME/micwatch"
-    install -m 0644 "$ROOT"/micwatch/*.py "$APPDIR/usr/share/$NAME/micwatch/"
+PYVER=3.12
+BASE_URL="$(curl -fsSL "https://api.github.com/repos/niess/python-appimage/releases/tags/python$PYVER" \
+    | tr ',' '\n' | grep '"browser_download_url"' | cut -d'"' -f4 \
+    | grep manylinux2014_x86_64 | head -1)"
+if [ -n "$AT" ] && [ -n "$BASE_URL" ] \
+   && curl -fsSL -o "$WORK/python.AppImage" "$BASE_URL"; then
+    chmod +x "$WORK/python.AppImage"
+    ( cd "$WORK" && ./python.AppImage --appimage-extract >/dev/null )
+    APPDIR="$WORK/squashfs-root"
+    SITE="$APPDIR/opt/python$PYVER/lib/python$PYVER/site-packages"
+
+    say "  bundling PySide6 and evdev (a ~150 MB download)"
+    "$APPDIR/AppRun" -m pip install --quiet --no-warn-script-location \
+        PySide6-Essentials evdev >"$WORK/pip.log" 2>&1 \
+        || { tail -5 "$WORK/pip.log"; exit 1; }
+
+    # Drop what a tray indicator never touches: QML, Qt translations, tooling.
+    ( cd "$SITE/PySide6" \
+      && rm -rf Qt/qml Qt/translations Qt/metatypes Qt/libexec \
+                Qt/plugins/qmltooling Qt/plugins/sqldrivers Qt/plugins/designer \
+      && rm -f Qt/lib/libQt6Quick*.so.6* Qt/lib/libQt6Qml*.so.6* \
+               Qt/lib/libQt6Designer*.so.6* Qt/lib/libQt6Help*.so.6* \
+               Qt/lib/libQt6Test*.so.6* Qt/lib/libQt6Sql*.so.6* \
+               Qt/lib/libQt6UiTools*.so.6* Qt/lib/libQt6Multimedia*.so.6* \
+      && rm -f QtQuick*.abi3.so QtQml*.abi3.so QtDesigner*.abi3.so \
+               QtHelp*.abi3.so QtTest*.abi3.so QtSql*.abi3.so \
+               QtUiTools*.abi3.so QtMultimedia*.abi3.so )
+    rm -rf "$SITE/pip" "$SITE/setuptools" "$SITE/pkg_resources"
+    find "$SITE" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
+
+    install -d "$SITE/micwatch"
+    install -m 0644 "$ROOT"/micwatch/*.py "$SITE/micwatch/"
+
+    rm -f "$APPDIR"/*.desktop "$APPDIR"/python.png "$APPDIR"/.DirIcon
+    rm -rf "$APPDIR/usr/share/applications" "$APPDIR/usr/share/metainfo"
+    install -Dm 0644 "$ROOT/packaging/$BIN.desktop" "$APPDIR/$BIN.desktop"
+    install -Dm 0644 "$ROOT/packaging/$BIN.desktop" \
+        "$APPDIR/usr/share/applications/$BIN.desktop"
     install -Dm 0644 "$ROOT/assets/$BIN-256.png" "$APPDIR/$BIN.png"
     install -Dm 0644 "$ROOT/assets/$BIN-256.png" \
         "$APPDIR/usr/share/icons/hicolor/256x256/apps/$BIN.png"
-    install -Dm 0644 "$ROOT/packaging/$BIN.desktop" "$APPDIR/$BIN.desktop"
-    cat > "$APPDIR/AppRun" <<'APPRUN'
-#!/bin/sh
-# MicWatch AppImage launcher: a thin wrapper around the system python3+PySide6.
-HERE="$(dirname "$(readlink -f "$0")")"
-if ! python3 -c "import PySide6.QtWidgets" 2>/dev/null; then
-    echo "MicWatch needs PySide6 installed on the system:" >&2
-    echo "  Fedora: sudo dnf install python3-pyside6" >&2
-    echo "  Debian/Ubuntu: sudo apt install python3-pyside6.qtwidgets" >&2
-    echo "  Arch: sudo pacman -S pyside6" >&2
-    exit 1
-fi
-command -v pw-cat >/dev/null 2>&1 || echo "MicWatch: pw-cat not found; level metering will not work." >&2
-command -v pactl  >/dev/null 2>&1 || echo "MicWatch: pactl not found; stream detection will not work." >&2
-export PYTHONPATH="$HERE/usr/share/micwatch-kde${PYTHONPATH:+:$PYTHONPATH}"
-exec python3 -m micwatch "$@"
-APPRUN
-    chmod +x "$APPDIR/AppRun"
+    ( cd "$APPDIR" && ln -sf "$BIN.png" .DirIcon )
+
+    # run MicWatch instead of dropping the user in a Python prompt
+    python3 - "$APPDIR/AppRun" "$PYVER" <<'PY'
+import sys, pathlib
+run, pyver = pathlib.Path(sys.argv[1]), sys.argv[2]
+text = run.read_text()
+old = f'"$APPDIR/opt/python{pyver}/bin/python{pyver}" "$@"'
+new = f'"$APPDIR/opt/python{pyver}/bin/python{pyver}" -m micwatch "$@"'
+assert old in text, "python-appimage AppRun changed shape"
+run.write_text(text.replace(old, new))
+PY
+
     ARCH=x86_64 "$AT" --appimage-extract-and-run "$APPDIR" \
         "$DIST/MicWatch-KDE-x86_64.AppImage" >"$WORK/appimage.log" 2>&1 \
-        && say "AppImage built" || { say "AppImage build failed:"; tail -15 "$WORK/appimage.log"; }
+        && say "  AppImage built ($(du -h "$DIST/MicWatch-KDE-x86_64.AppImage" | cut -f1), runs with no system PySide6)" \
+        || { say "AppImage build failed:"; tail -15 "$WORK/appimage.log"; }
 else
-    say "appimagetool unavailable — skipping AppImage"
+    say "appimagetool or the Python base is unavailable — skipping AppImage"
+fi
 fi
 
 # ── checksums ───────────────────────────────────────────────

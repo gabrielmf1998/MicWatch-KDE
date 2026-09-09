@@ -683,6 +683,16 @@ class SettingsWindow(QWidget):
         intro.setStyleSheet("color: #8b949e;")
         layout.addWidget(intro)
 
+        head = QHBoxLayout()
+        head.addStretch(1)
+        self.refresh_button = QPushButton("Refresh apps")
+        self.refresh_button.setToolTip(
+            "Re-scan the recording applications and input devices right now"
+        )
+        self.refresh_button.clicked.connect(self._refresh_now)
+        head.addWidget(self.refresh_button)
+        layout.addLayout(head)
+
         self.streams_box = QGroupBox("Applications")
         self.streams_layout = QVBoxLayout(self.streams_box)
         self.who = QLabel("Nothing has used the microphone yet.")
@@ -732,6 +742,13 @@ class SettingsWindow(QWidget):
         ok, message = self.tray.hotkey_status
         self.show_hotkey_status(ok, message)
         return page
+
+    def _refresh_now(self) -> None:
+        """Ask PipeWire again instead of waiting for the next tick."""
+        self.tray.monitor.refresh()
+        self.refresh_streams()
+        self.refresh_button.setText("Refreshed")
+        QTimer.singleShot(1200, lambda: self.refresh_button.setText("Refresh apps"))
 
     def _set_global_shortcut(self, key: str, value: str) -> None:
         self.config[key] = value
