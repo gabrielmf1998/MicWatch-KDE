@@ -35,9 +35,9 @@ curl -fsSL https://raw.githubusercontent.com/gabrielmf1998/MicWatch-KDE/main/ins
 Or grab a package from the [latest release](https://github.com/gabrielmf1998/MicWatch-KDE/releases/latest):
 
 ```sh
-sudo dnf install ./micwatch-kde-1.4.0-1.fc46.noarch.rpm       # Fedora
-sudo apt install ./micwatch-kde_1.4.0-1_all.deb               # Debian / Ubuntu
-sudo pacman -U ./micwatch-kde-1.4.0-1-any.pkg.tar.zst         # Arch
+sudo dnf install ./micwatch-kde-1.4.1-1.fc46.noarch.rpm       # Fedora
+sudo apt install ./micwatch-kde_1.4.1-1_all.deb               # Debian / Ubuntu
+sudo pacman -U ./micwatch-kde-1.4.1-1-any.pkg.tar.zst         # Arch
 chmod +x MicWatch-KDE-x86_64.AppImage && ./MicWatch-KDE-x86_64.AppImage
 ```
 
@@ -181,6 +181,9 @@ missing:
 - the `python3-evdev` package (a *Recommends* of the native packages, so it usually comes
   along)
 - your user in the `input` group — `sudo usermod -aG input $USER`, then log back in
+  (a reboot is surest: groups are fixed at login, and the systemd user manager that
+  starts MicWatch can outlive a plain logout). MicWatch tells you which of the two is
+  missing, and says so when you are already in the group and only need to log back in.
 
 ## Features
 

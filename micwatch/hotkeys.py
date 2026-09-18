@@ -15,7 +15,10 @@ needs: the microphone opens while the key is down and closes when you let go.
 
 from __future__ import annotations
 
+import glob
+import grp
 import os
+import pwd
 import selectors
 import threading
 
@@ -155,6 +158,57 @@ def keyboards(wanted: frozenset = frozenset()) -> list:
     return found
 
 
+def _device_group() -> str:
+    """The group that owns the input devices here — 'input' on most distros."""
+    for path in sorted(glob.glob("/dev/input/event*")):
+        try:
+            return grp.getgrgid(os.stat(path).st_gid).gr_name
+        except (OSError, KeyError):
+            continue
+    return "input"
+
+
+def _no_keyboard_reason() -> str:
+    """Why nothing could be opened, told apart so the advice actually applies.
+
+    Being added to the group is not enough on its own: groups are fixed at login,
+    so the running session — and the systemd user manager that started MicWatch —
+    still carries the old set. Telling someone who is already in the group to add
+    themselves again reads like the fix did not work, when all that is left is to
+    log back in.
+    """
+    if not glob.glob("/dev/input/event*"):
+        return "No input devices in /dev/input at all."
+    group = _device_group()
+    try:
+        gid = grp.getgrnam(group).gr_gid
+    except KeyError:
+        return (
+            f"No readable keyboard in /dev/input, and this system has no '{group}' "
+            "group. Check who owns /dev/input/event*."
+        )
+    if gid in os.getgroups():
+        return (
+            f"No readable keyboard in /dev/input even though MicWatch is in the "
+            f"'{group}' group. Check the permissions on /dev/input/event*."
+        )
+    try:
+        pw = pwd.getpwuid(os.getuid())
+        in_user_groups = gid in os.getgrouplist(pw.pw_name, pw.pw_gid)
+    except (KeyError, OSError):
+        in_user_groups = False
+    if in_user_groups:
+        return (
+            f"You are already in the '{group}' group, but this session still has "
+            "the old groups. Log out and back in — or reboot — and shortcuts will "
+            "work."
+        )
+    return (
+        f"No readable keyboard in /dev/input. Add your user to the '{group}' group "
+        f"(sudo usermod -aG {group} $USER) and log back in."
+    )
+
+
 def availability() -> tuple[bool, str]:
     """Can we listen at all, and what should the user be told?"""
     if evdev is None:
@@ -167,10 +221,7 @@ def availability() -> tuple[bool, str]:
     for device in devices:
         device.close()
     if not count:
-        return False, (
-            "No readable keyboard in /dev/input. Add your user to the 'input' group "
-            "(sudo usermod -aG input $USER) and log back in."
-        )
+        return False, _no_keyboard_reason()
     return True, f"Listening on {count} keyboard{'s' if count != 1 else ''}."
 
 

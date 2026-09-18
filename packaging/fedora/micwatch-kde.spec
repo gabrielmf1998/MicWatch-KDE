@@ -1,5 +1,5 @@
 Name:           micwatch-kde
-Version:        1.4.0
+Version:        1.4.1
 Release:        1%{?dist}
 Summary:        Microphone in-use tray indicator with a user-defined threshold
 
@@ -58,6 +58,11 @@ install -Dm 0644 README.md %{buildroot}%{_datadir}/doc/%{name}/README.md
 %{_datadir}/icons/hicolor/*/apps/micwatch.*
 
 %changelog
+* Fri Sep 18 2026 Gabriel Marques Ferrarezi <110578985+gabrielmf1998@users.noreply.github.com> - 1.4.1-1
+- Say which of the shortcut requirements is actually missing, instead of always
+  telling you to join the 'input' group: being in it already and needing to log
+  back in is a different message now
+
 * Fri Sep 18 2026 Gabriel Marques Ferrarezi <110578985+gabrielmf1998@users.noreply.github.com> - 1.4.0-1
 - Push to talk: hold a key to open the microphone, on the device of your choice
 - Push-to-mute mode and an adjustable release delay so words are not clipped
