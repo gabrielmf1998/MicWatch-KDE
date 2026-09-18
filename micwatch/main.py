@@ -38,7 +38,14 @@ def main(argv: list[str] | None = None) -> int:
     if "--settings" in argv:
         QTimer.singleShot(200, tray.open_settings)
 
-    signal.signal(signal.SIGINT, lambda *_: tray.quit())
+    # Quitting has to run tray.quit(): push-to-talk holds the microphone muted,
+    # and a session logout or `systemctl stop` sends SIGTERM, not SIGINT — without
+    # this the microphone would be left dead with nothing running to open it.
+    for _sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        try:
+            signal.signal(_sig, lambda *_: tray.quit())
+        except (OSError, ValueError, AttributeError):
+            pass
     timer = QTimer()
     timer.start(500)
     timer.timeout.connect(lambda: None)  # let Python handle signals

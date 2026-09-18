@@ -50,6 +50,15 @@ DEFAULTS: dict = {
     "shortcut_mute_all": "",      # toggle every recording app at once
     "shortcut_mute_device": "",   # toggle the input device itself
     "shortcut_feedback": True,    # a tray notification when a shortcut fires
+
+    # --- push to talk: the microphone stays muted until you hold the key ---
+    "ptt_enabled": False,
+    "ptt_shortcut": "",           # the key you hold to talk, e.g. "V" or "Ctrl+Space"
+    "ptt_device": "all",          # which mic it holds shut: "all" or a source name
+    "ptt_mode": "talk",           # "talk" = open while held, "mute" = muted while held
+    "ptt_release_ms": 250,        # keep the mic open this long after you let go
+    "ptt_feedback": False,        # a notification on every press would be noisy
+
     "poll_ms": 1500,              # safety-net poll on top of pactl events
 }
 

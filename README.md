@@ -4,8 +4,9 @@ A microphone in-use tray indicator for PipeWire, built for KDE Plasma.
 
 It lights up when the microphone is **actually being used** — you decide what that means,
 with a threshold in dBFS you set yourself — it lets you **mute one application's microphone
-without touching the others**, and it can do that from a **global keyboard shortcut** that
-works even inside a fullscreen game.
+without touching the others**, it gives you a **push-to-talk key** that keeps the mic shut
+until you hold it, and it can do all that from a **global keyboard shortcut** that works
+even inside a fullscreen game.
 
 ![Icon styles and states](docs/states.png)
 
@@ -34,9 +35,9 @@ curl -fsSL https://raw.githubusercontent.com/gabrielmf1998/MicWatch-KDE/main/ins
 Or grab a package from the [latest release](https://github.com/gabrielmf1998/MicWatch-KDE/releases/latest):
 
 ```sh
-sudo dnf install ./micwatch-kde-1.3.1-1.fc46.noarch.rpm       # Fedora
-sudo apt install ./micwatch-kde_1.3.1-1_all.deb               # Debian / Ubuntu
-sudo pacman -U ./micwatch-kde-1.3.1-1-any.pkg.tar.zst         # Arch
+sudo dnf install ./micwatch-kde-1.4.0-1.fc46.noarch.rpm       # Fedora
+sudo apt install ./micwatch-kde_1.4.0-1_all.deb               # Debian / Ubuntu
+sudo pacman -U ./micwatch-kde-1.4.0-1-any.pkg.tar.zst         # Arch
 chmod +x MicWatch-KDE-x86_64.AppImage && ./MicWatch-KDE-x86_64.AppImage
 ```
 
@@ -116,6 +117,38 @@ next to each mute box, so you can ride one program's mic gain without touching t
 While everything recording is muted, the tray icon turns red with a slash and MicWatch
 stops metering — it will not open the microphone to measure something that is silent.
 
+## Push to talk
+
+The microphone stays muted for every application until you hold a key, and closes again
+when you let go:
+
+![Push to talk](docs/settings-ptt.png)
+
+- **Talk key** — a plain key like `V` is the usual choice, but any combination KDE would
+  accept works too (`Ctrl+Space`, `Meta+F9`), recorded the same way as every other
+  shortcut here.
+- **Microphone** — hold one microphone shut and leave the others alone, or pick
+  *Every microphone*.
+- **Mode** — *push to talk*, or *push to mute* for the same thing inverted: open until
+  you hold the key.
+- **Stay open after release** — keeps the mic open for a moment after you let go, so the
+  end of a word is not clipped. 250 ms by default; set it to 0 to cut instantly.
+
+The key is read straight from `/dev/input`, so it fires in a fullscreen game, over a
+video, on Wayland and on X11 — whatever has focus, and whichever keyboard you press it
+on, including the second device a gaming keyboard exposes its extra keys through. The
+modifiers only have to be held, not held *alone*: `V` still talks while you are holding
+Shift to run.
+
+**It never leaves you muted by accident.** Switching it off, picking another microphone,
+losing the keyboard, quitting MicWatch and logging out of the session all hand the
+microphone back open. The one case it cannot cover is MicWatch being killed outright
+(`SIGKILL`), which no process can react to.
+
+While push to talk is on it owns the microphone device, so the tray's **Mute Mic** entry
+and the device shortcut are overridden on the next key press. The tray icon shows the
+state: red with a slash while the mic is shut, and it lights up the moment you press.
+
 ## Applications and shortcuts
 
 MicWatch keeps a list of everything that has used your microphone — browsers included —
@@ -151,6 +184,8 @@ missing:
 
 ## Features
 
+- **Push to talk** — hold a key to open the mic, on the microphone of your choice, with a
+  push-to-mute mode and an adjustable release delay.
 - **Per-application mute** from the tray menu, remembered across restarts of the app.
 - **Global shortcut per application** (`Shift+B`, `Ctrl+Alt+M`, …) that works in fullscreen.
 - **List of every app that has used the mic**, browsers included, with mute and shortcut
@@ -238,7 +273,7 @@ micwatch/icons.py       every icon painted at runtime with QPainter
 micwatch/tray.py        state machine: idle / open-quiet / in-use
 micwatch/settings.py    settings window with the live dB meter
 micwatch/autostart.py   XDG autostart entry
-micwatch/hotkeys.py     global shortcuts read from /dev/input
+micwatch/hotkeys.py     global shortcuts and push-to-talk holds, read from /dev/input
 packaging/              rpm spec, deb/arch/AppImage build script
 assets/gen_icons.py     regenerates the application icons
 ```

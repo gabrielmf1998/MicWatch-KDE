@@ -194,8 +194,9 @@ class IconPreview(QWidget):
 class ShortcutDialog(QDialog):
     """Capture one key combination, the way KDE's shortcut editor does."""
 
-    def __init__(self, current: str, title: str, parent=None) -> None:
+    def __init__(self, current: str, title: str, parent=None, bare_ok: bool = False) -> None:
         super().__init__(parent)
+        self._bare_ok = bare_ok
         self.setWindowTitle(title)
         self.setMinimumWidth(360)
         layout = QVBoxLayout(self)
@@ -233,6 +234,9 @@ class ShortcutDialog(QDialog):
             return
         if not hotkeys.has_modifier(text):
             self.note.setText(
+                f"Talk key: {text}. A plain key is the usual choice here — while you "
+                "hold it the microphone is open, so pick one you do not type."
+                if self._bare_ok else
                 f"“{text}” has no modifier — it will fire whenever you type that key. "
                 "Add Ctrl, Alt, Shift or Meta."
             )
@@ -247,9 +251,10 @@ class ShortcutDialog(QDialog):
 class ShortcutButton(QPushButton):
     """Shows the current combination and opens the capture dialog."""
 
-    def __init__(self, label: str, parent=None) -> None:
+    def __init__(self, label: str, parent=None, bare_ok: bool = False) -> None:
         super().__init__(parent)
         self._label = label
+        self._bare_ok = bare_ok
         self._value = ""
         self._on_change = None
         self.setMinimumWidth(120)
@@ -272,7 +277,9 @@ class ShortcutButton(QPushButton):
         self._on_change = callback
 
     def _edit(self) -> None:
-        dialog = ShortcutDialog(self._value, f"Shortcut — {self._label}", self)
+        dialog = ShortcutDialog(
+            self._value, f"Shortcut — {self._label}", self, bare_ok=self._bare_ok
+        )
         if dialog.exec() != QDialog.Accepted:
             return
         value = hotkeys.normalise(dialog.value())
@@ -446,6 +453,7 @@ class SettingsWindow(QWidget):
         tabs.addTab(self._appearance_tab(), "Appearance")
         tabs.addTab(self._detection_tab(), "Detection")
         tabs.addTab(self._apps_tab(), "Apps && shortcuts")
+        tabs.addTab(self._ptt_tab(), "Push to talk")
         tabs.addTab(self._behaviour_tab(), "Behaviour")
         root.addWidget(tabs, 1)
 
@@ -763,6 +771,151 @@ class SettingsWindow(QWidget):
         prefix = "Global shortcuts: " if ok else "Global shortcuts unavailable — "
         self.hotkey_note.setText(prefix + message)
         self.hotkey_note.setStyleSheet("color: %s;" % ("#8b949e" if ok else "#e3b341"))
+
+    def _ptt_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        intro = QLabel(
+            "Hold a key to talk. The microphone stays muted for every application "
+            "until you press it and closes again when you let go. The key is read "
+            "straight from the keyboard, so it works in a fullscreen game, on "
+            "Wayland and on X11 alike."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color: #8b949e;")
+        layout.addWidget(intro)
+
+        box = QGroupBox("Push to talk")
+        box_layout = QVBoxLayout(box)
+
+        self.ptt_on = QCheckBox("Enable push to talk")
+        self.ptt_on.setChecked(bool(self.config["ptt_enabled"]))
+        self.ptt_on.toggled.connect(lambda v: self.tray.set_ptt_enabled(bool(v)))
+        box_layout.addWidget(self.ptt_on)
+
+        form = QFormLayout()
+        self.ptt_key = ShortcutButton("push to talk", bare_ok=True)
+        self.ptt_key.set_value(self.config["ptt_shortcut"])
+        self.ptt_key.on_change(self._ptt_key_changed)
+        form.addRow("Talk key", self.ptt_key)
+
+        self.ptt_device = QComboBox()
+        self.ptt_device.addItem("Every microphone", "all")
+        for source in list_sources().values():
+            if source.real or source.virtual:
+                self.ptt_device.addItem(source.description, source.name)
+        self.ptt_device.setCurrentIndex(
+            max(0, self.ptt_device.findData(self.config["ptt_device"]))
+        )
+        self.ptt_device.setToolTip(
+            "Which microphone push to talk holds shut. Pick one and the others are "
+            "left alone."
+        )
+        self.ptt_device.currentIndexChanged.connect(self._ptt_device_changed)
+        form.addRow("Microphone", self.ptt_device)
+
+        self.ptt_mode = QComboBox()
+        self.ptt_mode.addItem("Push to talk — muted until you hold the key", "talk")
+        self.ptt_mode.addItem("Push to mute — open until you hold the key", "mute")
+        self.ptt_mode.setCurrentIndex(
+            max(0, self.ptt_mode.findData(self.config["ptt_mode"]))
+        )
+        self.ptt_mode.currentIndexChanged.connect(
+            lambda: self._set("ptt_mode", self.ptt_mode.currentData())
+        )
+        form.addRow("Mode", self.ptt_mode)
+
+        self.ptt_release = QSpinBox()
+        self.ptt_release.setRange(0, 2000)
+        self.ptt_release.setSingleStep(50)
+        self.ptt_release.setSuffix(" ms")
+        self.ptt_release.setValue(int(self.config["ptt_release_ms"]))
+        self.ptt_release.setToolTip(
+            "Keep the microphone open this long after you let go, so the end of a "
+            "word is not cut off."
+        )
+        self.ptt_release.valueChanged.connect(
+            lambda v: self._set("ptt_release_ms", int(v))
+        )
+        form.addRow("Stay open after release", self.ptt_release)
+        box_layout.addLayout(form)
+
+        self.ptt_feedback = QCheckBox(
+            "Show a notification each time the microphone opens or closes"
+        )
+        self.ptt_feedback.setChecked(bool(self.config["ptt_feedback"]))
+        self.ptt_feedback.toggled.connect(lambda v: self._set("ptt_feedback", bool(v)))
+        box_layout.addWidget(self.ptt_feedback)
+
+        # live, so you can press the key and watch it work from this window
+        self.ptt_state = QLabel("")
+        self.ptt_state.setWordWrap(True)
+        box_layout.addWidget(self.ptt_state)
+
+        self.ptt_note = QLabel("")
+        self.ptt_note.setWordWrap(True)
+        self.ptt_note.setStyleSheet("color: #8b949e;")
+        box_layout.addWidget(self.ptt_note)
+        layout.addWidget(box)
+
+        warn = QLabel(
+            "While it is on, push to talk owns the microphone device: the tray's "
+            "“Mute Mic” and the device shortcut are overridden on the next key "
+            "press. Switching it off always hands the microphone back open, and so "
+            "does quitting MicWatch."
+        )
+        warn.setWordWrap(True)
+        warn.setStyleSheet("color: #8b949e;")
+        layout.addWidget(warn)
+        layout.addStretch(1)
+
+        self._ptt_timer = QTimer(self)
+        self._ptt_timer.timeout.connect(self.sync_ptt)
+        self._ptt_timer.start(150)
+        self.sync_ptt()
+        return page
+
+    def _ptt_device_changed(self) -> None:
+        """Let go of the old microphone before taking hold of the new one."""
+        self.tray.release_ptt_devices()
+        self._set("ptt_device", self.ptt_device.currentData())
+        self.sync_ptt()
+
+    def _ptt_key_changed(self, value: str) -> None:
+        self.config["ptt_shortcut"] = value
+        self.config.save()
+        self.tray.apply_shortcuts()
+        self.tray.apply_ptt()
+        self.sync_ptt()
+
+    def sync_ptt(self) -> None:
+        """Mirror the live push-to-talk state: pressing the key shows up here."""
+        if not hasattr(self, "ptt_state"):
+            return
+        enabled = bool(self.config["ptt_enabled"])
+        if self.ptt_on.isChecked() != enabled:
+            self.ptt_on.blockSignals(True)
+            self.ptt_on.setChecked(enabled)
+            self.ptt_on.blockSignals(False)
+        ok, message = self.tray.hotkey_status
+        key = self.config["ptt_shortcut"]
+        if not key:
+            text, colour = "No key set yet — push to talk is off.", "#8b949e"
+        elif not enabled:
+            text, colour = "Off — every application hears the microphone.", "#8b949e"
+        elif self.tray.ptt_problem():
+            text, colour = (
+                f"Inactive, microphone left open — {self.tray.ptt_problem()}",
+                "#e3b341",
+            )
+        elif self.tray.ptt_talking():
+            text, colour = f"● TALKING — {key} is down", "#3fb950"
+        else:
+            text, colour = f"○ Muted — hold {key} to talk", "#e5534b"
+        self.ptt_state.setText(text)
+        self.ptt_state.setStyleSheet(f"color: {colour}; font-weight: bold;")
+        self.ptt_note.setText(message)
 
     def _behaviour_tab(self) -> QWidget:
         page = QWidget()

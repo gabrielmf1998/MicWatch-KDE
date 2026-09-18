@@ -7,6 +7,10 @@ works in a fullscreen game, on Wayland and on X11 alike.
 
 Nothing is ever grabbed and nothing is logged — the listener only compares each
 key press against the combinations you configured.
+
+Two kinds of binding live here. A *shortcut* fires once, when the key goes down.
+A *hold* reports the press and the release separately, which is what push-to-talk
+needs: the microphone opens while the key is down and closes when you let go.
 """
 
 from __future__ import annotations
@@ -122,8 +126,14 @@ def has_modifier(text: str) -> bool:
     return bool(modifiers)
 
 
-def keyboards() -> list:
-    """Every readable input device that can emit letter keys."""
+def keyboards(wanted: frozenset = frozenset()) -> list:
+    """Every readable input device that can emit the keys we care about.
+
+    A normal keyboard is the common case, but gaming keyboards put their macro
+    and media keys on a second device that has no KEY_A at all, and a push-to-talk
+    key has to work wherever it physically lives — so any device that can emit a
+    key we were asked to watch is opened too.
+    """
     if evdev is None:
         return []
     found = []
@@ -132,8 +142,13 @@ def keyboards() -> list:
             device = evdev.InputDevice(path)
         except OSError:
             continue
-        keys = device.capabilities().get(ecodes.EV_KEY, [])
-        if ecodes.KEY_A in keys and ecodes.KEY_LEFTSHIFT in keys:
+        try:
+            keys = set(device.capabilities().get(ecodes.EV_KEY, []))
+        except OSError:
+            device.close()
+            continue
+        typing = ecodes.KEY_A in keys and ecodes.KEY_LEFTSHIFT in keys
+        if typing or (wanted and keys & wanted):
             found.append(device)
         else:
             device.close()
@@ -162,12 +177,15 @@ def availability() -> tuple[bool, str]:
 class HotkeyListener(QThread):
     """Watches every keyboard for the configured combinations."""
 
-    activated = Signal(str)          # action id
+    activated = Signal(str)          # action id, on the key going down
+    hold_changed = Signal(str, bool)  # action id, True on press and False on release
     status_changed = Signal(bool, str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._bindings: dict[str, tuple[frozenset[str], int]] = {}
+        self._holds: dict[str, tuple[frozenset[str], int]] = {}
+        self._down: set[str] = set()
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._wake_r, self._wake_w = os.pipe()
@@ -185,10 +203,49 @@ class HotkeyListener(QThread):
             self._bindings = parsed
         self._wake()
 
+    def set_holds(self, mapping: dict[str, str]) -> None:
+        """Bindings whose press and release are both reported (push-to-talk)."""
+        parsed: dict[str, tuple[frozenset[str], int]] = {}
+        for action, text in mapping.items():
+            combo = parse(text)
+            if combo is not None:
+                parsed[action] = combo
+        with self._lock:
+            self._holds = parsed
+            stale = [a for a in self._down if a not in parsed]
+            self._down -= set(stale)
+        for action in stale:      # a binding that vanished counts as released
+            self.hold_changed.emit(action, False)
+        self._wake()
+
+    def _wanted_codes(self) -> frozenset:
+        """Every key code we were asked to watch, for picking input devices."""
+        with self._lock:
+            combos = list(self._bindings.values()) + list(self._holds.values())
+        return frozenset(code for _, code in combos)
+
+    @property
+    def has_work(self) -> bool:
+        with self._lock:
+            return bool(self._bindings or self._holds)
+
+    def release_all(self) -> None:
+        """Fail-safe: we can no longer see the keyboard, so nothing is held.
+
+        Called whenever the device set is rebuilt or the thread stops — without
+        it a key released behind our back would leave push-to-talk stuck open.
+        """
+        with self._lock:
+            actions = list(self._down)
+            self._down.clear()
+        for action in actions:
+            self.hold_changed.emit(action, False)
+
     def stop(self) -> None:
         self._stop.set()
         self._wake()
         self.wait(1500)
+        self.release_all()
 
     def _wake(self) -> None:
         try:
@@ -213,21 +270,27 @@ class HotkeyListener(QThread):
             return
 
         while not self._stop.is_set():
-            devices = keyboards()
+            devices = keyboards(self._wanted_codes())
             if not devices:
                 self.status_changed.emit(False, "No readable keyboard in /dev/input.")
                 if self._stop.wait(5):
                     break
                 continue
-            known_paths = {d.path for d in devices}
+            # Compare against every device node, not just the keyboards we
+            # opened: list_devices() lists mice and everything else too, so
+            # comparing it with our filtered set was never equal — the loop
+            # rebuilt itself on every pass and lost `held` with it, which is why
+            # a combination like Ctrl+B could never fire.
+            all_paths = set(evdev.list_devices()) if evdev is not None else set()
             selector = selectors.DefaultSelector()
             selector.register(self._wake_r, selectors.EVENT_READ, None)
             for device in devices:
                 selector.register(device, selectors.EVENT_READ, device)
             held: set[int] = set()
+            stale = False
             try:
                 while not self._stop.is_set():
-                    for key, _ in selector.select(timeout=4):
+                    for key, _ in selector.select(timeout=1):
                         device = key.data
                         if device is None:
                             try:
@@ -239,11 +302,13 @@ class HotkeyListener(QThread):
                             events = list(device.read())
                         except OSError:
                             selector.unregister(device)
-                            known_paths.discard(device.path)
+                            stale = True      # lost a keyboard: start over
                             continue
                         self._handle(events, held)
-                    if evdev is not None and set(evdev.list_devices()) != known_paths:
-                        break  # a keyboard came or went: rebuild the selector
+                    if stale:
+                        break
+                    if evdev is not None and set(evdev.list_devices()) != all_paths:
+                        break  # a device came or went: rebuild the selector
             finally:
                 selector.close()
                 for device in devices:
@@ -251,6 +316,7 @@ class HotkeyListener(QThread):
                         device.close()
                     except OSError:
                         pass
+                self.release_all()   # we stop seeing key-ups from here on
 
     def _handle(self, events, held: set[int]) -> None:
         for event in events:
@@ -258,8 +324,9 @@ class HotkeyListener(QThread):
                 continue
             if event.value == 0:
                 held.discard(event.code)
+                self._release_code(event.code)
                 continue
-            if event.value != 1:      # 2 == auto-repeat
+            if event.value != 1:      # 2 == auto-repeat: it is already down
                 continue
             held.add(event.code)
             active = {
@@ -267,6 +334,31 @@ class HotkeyListener(QThread):
             }
             with self._lock:
                 bindings = dict(self._bindings)
+                holds = dict(self._holds)
             for action, (modifiers, trigger) in bindings.items():
                 if event.code == trigger and active == modifiers:
                     self.activated.emit(action)
+            # A hold only needs its modifiers to be present, not to be the only
+            # ones down: you may well be holding Shift to run while you talk.
+            for action, (modifiers, trigger) in holds.items():
+                if event.code == trigger and modifiers <= active:
+                    self._press(action)
+
+    def _press(self, action: str) -> None:
+        with self._lock:
+            if action in self._down:
+                return
+            self._down.add(action)
+        self.hold_changed.emit(action, True)
+
+    def _release_code(self, code: int) -> None:
+        """A key came up: release every hold triggered by it, whatever modifiers
+        are still down — you may let go of Ctrl before the talk key itself."""
+        with self._lock:
+            actions = [
+                a for a, (_, trigger) in self._holds.items()
+                if trigger == code and a in self._down
+            ]
+            self._down -= set(actions)
+        for action in actions:
+            self.hold_changed.emit(action, False)

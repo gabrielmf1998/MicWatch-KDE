@@ -60,13 +60,21 @@ class MicWatchTray(QObject):
         self.updates = updates.UpdateChecker(self)
         self.updates.checked.connect(self._on_update_checked)
 
+        self._ptt_running = False    # push-to-talk owns the input devices
+        self._ptt_down = False       # the talk key is held right now
+        self._ptt_timer = QTimer(self)
+        self._ptt_timer.setSingleShot(True)
+        self._ptt_timer.timeout.connect(self._ptt_close)
+
         self.hotkeys = hotkeys.HotkeyListener(self)
         self.hotkeys.activated.connect(self._on_hotkey)
+        self.hotkeys.hold_changed.connect(self._on_hold)
         self.hotkeys.status_changed.connect(self._on_hotkey_status)
         self.hotkey_status = (False, "Not listening: no shortcut configured yet.")
         self.apply_shortcuts()
 
         self.monitor.start()
+        self.apply_ptt()             # settle into the resting state before showing
         self._refresh_all()
         self.tray.show()
 
@@ -76,6 +84,9 @@ class MicWatchTray(QObject):
         self._status_action = QAction("Microphone idle", self.menu)
         self._autostart_action = QAction("Start on login", self.menu)
         self._rebuild_menu()
+        # push-to-talk flips the device mute between openings, so rebuild on the
+        # way up instead of repainting the menu on every key press
+        self.menu.aboutToShow.connect(self._rebuild_menu)
         self.tray.setContextMenu(self.menu)
 
     def _rebuild_menu(self) -> None:
@@ -114,6 +125,19 @@ class MicWatchTray(QObject):
         )
         mic_action.toggled.connect(self.set_mic_mute)
         menu.addAction(mic_action)
+
+        if self.config["ptt_shortcut"]:
+            talk = self.config["ptt_mode"] != "mute"
+            label = "Push to talk" if talk else "Push to mute"
+            ptt_action = QAction(f"{label} — hold {self.config['ptt_shortcut']}", menu)
+            ptt_action.setCheckable(True)
+            ptt_action.setChecked(bool(self.config["ptt_enabled"]))
+            ptt_action.setToolTip(
+                "The microphone stays muted until you hold the key"
+                if talk else "The microphone is muted only while you hold the key"
+            )
+            ptt_action.toggled.connect(self.set_ptt_enabled)
+            menu.addAction(ptt_action)
         menu.addSeparator()
 
         apps = self.monitor.recording_apps()
@@ -382,8 +406,12 @@ class MicWatchTray(QObject):
             bindings["all"] = self.config["shortcut_mute_all"]
         if self.config["shortcut_mute_device"]:
             bindings["device"] = self.config["shortcut_mute_device"]
+        holds: dict[str, str] = {}
+        if self.ptt_wanted():
+            holds["ptt"] = self.config["ptt_shortcut"]
         self.hotkeys.set_bindings(bindings)
-        if bindings:
+        self.hotkeys.set_holds(holds)
+        if bindings or holds:
             if not self.hotkeys.isRunning():
                 self.hotkeys.start()
         elif self.hotkeys.isRunning():
@@ -393,6 +421,8 @@ class MicWatchTray(QObject):
 
     def _on_hotkey_status(self, ok: bool, message: str) -> None:
         self.hotkey_status = (ok, message)
+        # No keyboard means no key-ups will ever arrive: give the mic back.
+        self.apply_ptt()
         if self._settings is not None:
             self._settings.show_hotkey_status(ok, message)
 
@@ -426,11 +456,134 @@ class MicWatchTray(QObject):
         if self.config["shortcut_feedback"]:
             self.tray.showMessage(APP_NAME, text, self.tray.icon(), 2000)
 
+    # -- push to talk ----------------------------------------------------
+    # While this is on, the input devices belong to the key: muted at rest, open
+    # only while you hold it. Every way it can end — switched off, no readable
+    # keyboard, MicWatch quitting — unmutes on the way out. A microphone that is
+    # silently dead is the one failure this must never produce.
+    def ptt_wanted(self) -> bool:
+        return bool(self.config["ptt_enabled"]) and bool(self.config["ptt_shortcut"])
+
+    def ptt_active(self) -> bool:
+        """True when push-to-talk is actually driving the microphone."""
+        return self._ptt_running
+
+    def ptt_talking(self) -> bool:
+        """True when the mic is open because of the key right now."""
+        if not self._ptt_running:
+            return False
+        return self._ptt_down if self.config["ptt_mode"] != "mute" else not self._ptt_down
+
+    def apply_ptt(self) -> None:
+        """Start or stop driving the microphone, following config and keyboard."""
+        want = self.ptt_wanted() and self.hotkey_status[0]
+        if want and not self._ptt_running:
+            self._ptt_running = True
+            self._ptt_down = False
+            self._ptt_apply()
+        elif want and self._ptt_running:
+            self._ptt_apply()        # the mode may have been flipped meanwhile
+        elif not want and self._ptt_running:
+            self._ptt_timer.stop()
+            self._ptt_running = False
+            self._ptt_down = False
+            self._set_devices_muted(False)
+
+    def release_ptt_devices(self) -> None:
+        """Hand back whatever push-to-talk is holding, before the target changes.
+
+        Without this, switching to another microphone would leave the previous one
+        muted with nothing left to unmute it.
+        """
+        if self._ptt_running:
+            self._ptt_timer.stop()
+            self._set_devices_muted(False)
+            self._ptt_running = False
+            self._ptt_down = False
+
+    def set_ptt_enabled(self, enabled: bool) -> None:
+        self.config["ptt_enabled"] = bool(enabled)
+        self.config.save()
+        self.apply_shortcuts()
+        self.apply_ptt()
+        if self._settings is not None and hasattr(self._settings, "sync_ptt"):
+            self._settings.sync_ptt()
+
+    def _ptt_targets(self) -> list:
+        """The devices push-to-talk holds shut: the chosen mic, or every one."""
+        chosen = self.config["ptt_device"]
+        if chosen and chosen != "all":
+            return [s for s in self.monitor.sources.values() if s.name == chosen]
+        return self.monitor.input_devices()
+
+    def ptt_problem(self) -> str:
+        """Why push-to-talk is not holding the microphone, when it should be."""
+        if not self.ptt_wanted():
+            return ""
+        if not self.hotkey_status[0]:
+            return self.hotkey_status[1]
+        if not self._ptt_targets():
+            chosen = self.config["ptt_device"]
+            if chosen and chosen != "all":
+                return "The microphone picked for push to talk is not connected."
+            return "No input device found to mute."
+        return ""
+
+    def _ptt_apply(self) -> None:
+        if self._ptt_running:
+            self._set_devices_muted(not self.ptt_talking())
+
+    def _on_hold(self, action: str, pressed: bool) -> None:
+        if action != "ptt":
+            return
+        if pressed:
+            self._ptt_timer.stop()
+            if self._ptt_running and not self._ptt_down:
+                self._ptt_down = True
+                self._ptt_apply()
+                self._ptt_notify()
+            return
+        if not self._ptt_down:
+            return
+        delay = max(0, int(self.config["ptt_release_ms"]))
+        if delay:
+            self._ptt_timer.start(delay)   # do not clip the last syllable
+        else:
+            self._ptt_close()
+
+    def _ptt_close(self) -> None:
+        self._ptt_timer.stop()
+        if self._ptt_down:
+            self._ptt_down = False
+            self._ptt_apply()
+            self._ptt_notify()
+
+    def _ptt_notify(self) -> None:
+        if self.config["ptt_feedback"]:
+            self._hotkey_feedback(
+                "Microphone open" if self.ptt_talking() else "Microphone muted"
+            )
+
+    def _set_devices_muted(self, mute: bool) -> None:
+        """Mute or open the push-to-talk devices, updating the cached state with
+        them so the icon follows the key instead of waiting for the next poll."""
+        devices = self._ptt_targets()
+        if not devices:
+            return
+        for device in devices:
+            set_source_mute(device.name, mute)
+            device.muted = mute
+        self._refresh_all()
+        if self._settings is not None:
+            self._settings.sync_ptt()
+
     def _muted_now(self) -> bool:
         """Muted when everything being counted is silent — per stream or per device."""
         streams = self.monitor.streams
         if streams:
             return all(self.monitor.stream_is_silent(s) for s in streams)
+        if self._ptt_running and not self.ptt_talking() and self._ptt_targets():
+            return True          # push-to-talk is holding the microphone shut
         return self.mic_muted()
 
     def _on_meter_failed(self, reason: str) -> None:
@@ -603,6 +756,7 @@ class MicWatchTray(QObject):
 
     def apply_config(self) -> None:
         self.apply_shortcuts()
+        self.apply_ptt()
         self.monitor.apply_config()
         self._refresh_all()
         self._sync_animation()
@@ -620,6 +774,10 @@ class MicWatchTray(QObject):
     def quit(self) -> None:
         from PySide6.QtWidgets import QApplication
 
+        if self._ptt_running:        # hand the microphone back before leaving
+            self._ptt_timer.stop()
+            self._ptt_running = False
+            self._set_devices_muted(False)
         self._anim.stop()
         self.hotkeys.stop()
         self.meter.stop()
